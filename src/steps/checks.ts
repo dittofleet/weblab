@@ -212,6 +212,28 @@ const EXPECTATIONS: Expectation[] = [
     },
   ],
   [
+    "electron",
+    (ctx, { electron: code }) => {
+      if (typeof code !== "string") bad("expect", `{ "electron": "JavaScript that turns true in the main process" }`);
+      let found: unknown;
+      let threw: string | undefined;
+      return {
+        holds: async () => {
+          try {
+            found = await ctx.electron(code);
+            threw = undefined;
+          } catch (error) {
+            if (error instanceof UsageError) throw error;
+            threw = briefError(error);
+            return false;
+          }
+          return Boolean(found);
+        },
+        wanted: () => (threw === undefined ? `${short(code)} to be truthy in the main process, it was ${short(JSON.stringify(found) ?? String(found))}` : `${short(code)} to be truthy in the main process, but it threw: ${threw}`),
+      };
+    },
+  ],
+  [
     "console",
     (ctx, { console: wanted }) => {
       const matches = matcher(wanted, "expect");
@@ -247,7 +269,7 @@ const EXPECTATIONS: Expectation[] = [
         holds: async () => errors().length === 0,
         wanted: () => {
           const found = errors();
-          const lines = found.slice(0, 5).map((entry) => `    ${short(entry.text)}${entry.url ? ` (${entry.url})` : ""}`);
+          const lines = found.slice(0, 5).map((entry) => `    ${short(entry.text)}${entry.process === "main" ? " (main process)" : entry.url ? ` (${entry.url})` : ""}`);
           const more = found.length > 5 ? [`    and ${found.length - 5} more, in the console log`] : [];
           return `no console errors or page errors since the page loaded, found ${found.length}:\n${[...lines, ...more].join("\n")}`;
         },

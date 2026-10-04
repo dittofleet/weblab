@@ -23,7 +23,7 @@ const BASES = new WeakMap<Step, string>();
 export const stepBase = (step: Step): string | undefined => BASES.get(step);
 
 // Steps whose values are code, where `${...}` may be the code's own.
-const CODE_STEPS = new Set(["js", "css", "playwright", "cdp"]);
+const CODE_STEPS = new Set(["js", "css", "playwright", "cdp", "electron"]);
 
 /** A copy of a step with more beside its action, still knowing where it was written. */
 export function withDefaults(step: Step, extra: Step): Step {

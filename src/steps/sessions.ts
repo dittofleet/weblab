@@ -4,7 +4,7 @@
 import type { Action, SessionOptions } from "../types.ts";
 import { bad, isObject } from "./args.ts";
 
-export const SESSION_KEYS = ["name", "dir", "address", "start", "startTimeout", "path", "attach", "tab", "newTab", "browser", "browserArgs", "headed", "persist", "state", "viewport", "context", "trace", "timeout", "ignore", "ready", "out"];
+export const SESSION_KEYS = ["name", "dir", "address", "start", "startTimeout", "path", "attach", "tab", "newTab", "inspect", "browser", "browserArgs", "headed", "persist", "state", "viewport", "context", "trace", "timeout", "ignore", "ready", "out"];
 
 export const sessionSteps: Record<string, Action> = {
   new: async (ctx, args) => {

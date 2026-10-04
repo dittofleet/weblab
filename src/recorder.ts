@@ -52,6 +52,8 @@ export type Recorder = {
   ignore(patterns: string[]): void;
   /** A line in the console log, from weblab rather than the page. */
   note(line: string): void;
+  /** What an Electron app's main process logged: for every tab, as a worker's is. */
+  fromMain(type: string, text: string): void;
   /** Takes the listeners off again: an attached browser's context outlives the session. */
   stop(): void;
 };
@@ -182,6 +184,10 @@ export function record(
     },
     ignore,
     note,
+    fromMain(type, text) {
+      const entry = { type, text: cut(text, MAX_CONSOLE_LINE), process: "main" as const };
+      heard(type === "error" ? "console" : null, `[main console.${type}] ${text}`, entry, null);
+    },
     stop() {
       for (const [event, listener] of events) (context.off as Listen).call(context, event, listener);
       for (const tab of tabs) tab.off("websocket", onSocket);

@@ -47,6 +47,8 @@ export type Settings = {
   tab?: string;
   /** Drive a new tab in the attached browser, and leave its own alone. */
   newTab?: boolean;
+  /** An attached Electron app's main process, for `electron` steps: the port or address its `--inspect` gave it. */
+  inspect?: string;
   /** Keep one browser profile for this project between sessions. */
   persist?: boolean;
 };
@@ -66,8 +68,8 @@ export type App = {
 /** The refs one tree printed, and the page (its address, and which load of it) they were of. */
 export type Refs = { page: Page; url: string; load: number; names: Set<string> };
 
-/** A console message or page error, as the console log records it. */
-export type ConsoleEntry = { type: string; text: string; url?: string };
+/** A console message or page error, as the console log records it. `process` is "main" for what an Electron app's main process logged. */
+export type ConsoleEntry = { type: string; text: string; url?: string; process?: "main" };
 
 /** A response the page had, as the network log records it. */
 export type ResponseEntry = { status: number; method: string; url: string; mocked: boolean };
@@ -121,6 +123,11 @@ export type ActionContext = {
   ignore(patterns: string[]): void;
   /** Sends a raw Chrome DevTools Protocol command to the current tab, over a connection kept open for it. */
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Runs code in the attached Electron app's main process and hands back its value: statements
+   * whose last one's value it is, or a function given `electron` and `arg`. Needs `inspect`.
+   */
+  electron(code: string | ((electron: any, arg: any) => unknown), arg?: unknown): Promise<unknown>;
   /** Turns a target (a selector, a ref, `{ role, name }`, ...) into a Playwright locator, as the built-in steps do. */
   locate(target: unknown, options?: { all?: boolean }): Locator;
   /** The `params` the run was given, for code to read. */
@@ -163,6 +170,7 @@ export type SessionOptions = {
   attach?: string | number;
   tab?: string;
   newTab?: boolean;
+  inspect?: string | number;
   browser?: string;
   browserArgs?: string[];
   headed?: boolean;
@@ -180,7 +188,7 @@ export type SessionOptions = {
 };
 
 /** A session as code holds it, driven with the same steps. Ended with `end()`, or like any other. */
-export type SessionHandle = Pick<ActionContext, "name" | "locate" | "cdp" | "step"> & {
+export type SessionHandle = Pick<ActionContext, "name" | "locate" | "cdp" | "electron" | "step"> & {
   readonly page: Page;
   readonly context: BrowserContext;
   readonly origin: string;

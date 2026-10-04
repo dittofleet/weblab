@@ -13,6 +13,7 @@ import { type CDPSession, type Page } from "playwright-core";
 import { originOf, resolveApp } from "./app.ts";
 import { createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
 import { withoutCursor } from "./cursor.ts";
+import { browserProcess, joinMainProcess, type MainProcess } from "./electron.ts";
 import { SetupError, StepFailure, stepError, UsageError } from "./errors.ts";
 import { filming } from "./film.ts";
 import { record, type Recorder } from "./recorder.ts";
@@ -208,7 +209,7 @@ const IDENTITY = ["storageState", "httpCredentials", "extraHTTPHeaders"];
 // it is driven, and where. Never who it is (a saved sign-in, a kept
 // profile), nor which running browser it joined.
 function inherited(parent: Driver): SessionOptions {
-  const { name: _name, attach: _attach, tab: _tab, newTab: _newTab, persist: _persist, state: _state, path: _path, address: _address, context, ...rest } = parent.options;
+  const { name: _name, attach: _attach, tab: _tab, newTab: _newTab, inspect: _inspect, persist: _persist, state: _state, path: _path, address: _address, context, ...rest } = parent.options;
   return {
     ...rest,
     ...(context === undefined ? {} : { context: Object.fromEntries(Object.entries(context).filter(([key]) => !IDENTITY.includes(key))) }),
@@ -229,6 +230,9 @@ function checked(options: SessionOptions): SessionOptions {
   }
   if (options.attach === undefined && (options.tab !== undefined || options.newTab)) {
     throw new UsageError("new: tab and newTab say what to drive in a running browser; they need attach");
+  }
+  if (options.attach === undefined && options.inspect !== undefined) {
+    throw new UsageError("new: inspect joins the main process of an Electron app the session is attached to; it needs attach, the app's Chromium debugging port");
   }
   const launchOnly = (["browser", "browserArgs", "persist", "state", "context", "headed"] as const).filter((key) => options[key] !== undefined && options[key] !== false);
   if (options.attach !== undefined && launchOnly.length > 0) {
@@ -290,6 +294,7 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     ...(options.attach === undefined ? {} : { attach: String(options.attach) }),
     ...(options.tab === undefined ? {} : { tab: options.tab }),
     ...(options.newTab ? { newTab: true } : {}),
+    ...(options.inspect === undefined ? {} : { inspect: String(options.inspect) }),
     ...(options.persist ? { persist: true } : {}),
   };
   const app = resolveApp(options.dir, settings);
@@ -368,6 +373,16 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       },
     });
     undo.push(() => recorder.stop());
+    // An Electron app's main process, when its debugger's port is given: joined now, so a wrong port is said at once.
+    const main: MainProcess | null = settings.inspect === undefined ? null : await joinMainProcess(settings.inspect, `${name}-${process.pid}-${times}`, recorder.fromMain);
+    if (main !== null) {
+      undo.push(() => main.close());
+      // The two ports are one app's: its windows' browser process is its main process.
+      const windows = await browserProcess(context);
+      if (windows !== null && windows !== main.pid) {
+        throw new SetupError(`attach ${settings.attach} and inspect ${settings.inspect} are two different apps (processes ${windows} and ${main.pid}); give one app's two ports`);
+      }
+    }
     const film = filming(dir, files, say);
     if (browser.windowed) {
       // For captures of the real screen: see screen.ts.
@@ -406,6 +421,12 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
           cdpSessions.set(ctx.page, connection);
         }
         return connection.send(method as never, params as never);
+      },
+      electron(code, arg) {
+        if (main === null) throw new UsageError("electron: this session has no main process to run code in; open it with inspect, the port the app's --inspect gave it");
+        // A function is called with the electron module and the argument, as Playwright's electronApp.evaluate does.
+        const source = typeof code === "function" ? `await (${code.toString()})(electron, ${JSON.stringify(arg) ?? "undefined"})` : code;
+        return main.evaluate(source, ctx.timeout);
       },
       windowed: browser.windowed,
       get video() {
@@ -543,6 +564,7 @@ const handle = (name: string): SessionHandle => ({
   },
   locate: (target, options) => pick(name).ctx.locate(target, options),
   cdp: (method, params) => pick(name).ctx.cdp(method, params),
+  electron: (code, arg) => pick(name).ctx.electron(code, arg),
   step: (step) => codeStep(step, name),
   end: async () => report(await end(name)),
 });
@@ -611,6 +633,10 @@ function invoke(step: Step, defaultOn: string): Promise<unknown> {
     });
   }
   const driver = pick(on);
+  // A running app that quit or restarted is gone; the session can only be ended.
+  if (driver.attached && action !== "end" && action !== "new" && driver.ctx.context.browser()?.isConnected() === false) {
+    throw new StepFailure("the app this session is attached to went away: it quit or restarted. End the session and open it again");
+  }
   const job = jobs.getStore();
   // Steps that code runs side by side on one session share its timeout: the last one set wins.
   driver.ctx.timeout = (step.timeout as number | undefined) ?? job?.timeout ?? driver.timeout;

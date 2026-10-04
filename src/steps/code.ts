@@ -3,6 +3,7 @@
 //   css          a stylesheet added to the page
 //   playwright   Playwright code driving the page from outside
 //   cdp          one raw Chrome DevTools Protocol command
+//   electron     JavaScript in an attached Electron app's main process
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import type { Action, ActionContext } from "../types.ts";
 import { arg, bad } from "./args.ts";
@@ -20,6 +21,7 @@ const codeScope = (ctx: ActionContext) => ({
   newSession: ctx.newSession,
   locate: ctx.locate,
   cdp: ctx.cdp,
+  electron: ctx.electron,
   logs: ctx.logs,
   responses: ctx.responses,
   params: ctx.params,
@@ -72,5 +74,12 @@ export const codeSteps: Record<string, Action> = {
     const { method, params } = arg<{ method?: string; params?: Record<string, unknown> }>(args, "method", "cdp");
     if (typeof method !== "string") return bad("cdp", `"Domain.method", or { method, params }`);
     return ctx.cdp(method, params);
+  },
+
+  electron: async (ctx, args) => {
+    const { code, file } = arg<{ code?: string; file?: string }>(args, "code", "electron");
+    if (typeof file === "string") return ctx.electron(readFileSync(await ctx.resolveFile(file), "utf8"));
+    if (typeof code !== "string") return bad("electron", `JavaScript for the app's main process, as a string, or { file }`);
+    return ctx.electron(code);
   },
 };

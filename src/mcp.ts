@@ -206,7 +206,8 @@ async function answering(work: () => Promise<Result>): Promise<Result> {
 }
 
 const describe = (open: Session): string => {
-  const at = open.attached ? `attached to ${open.app.settings.attach}${open.address === null ? "" : `, at ${open.address}`}` : `at ${open.address}`;
+  const { attach, inspect } = open.app.settings;
+  const at = open.attached ? `attached to ${attach}${inspect === undefined ? "" : `, main process at ${inspect}`}${open.address === null ? "" : `, at ${open.address}`}` : `at ${open.address}`;
   const server = open.server?.owned ? ` (server started by weblab: ${open.server.command})` : "";
   return `${open.name}  ${at}${server}`;
 };
@@ -231,6 +232,7 @@ const sessionOptions = z.object({
   attach: z.union([z.string(), z.number()]).optional().describe("Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. It is left as it was found."),
   tab: z.string().optional().describe("With attach: which tab to drive, by part of its URL or title (default: the first)."),
   newTab: z.boolean().optional().describe("With attach: drive a new tab, and leave the browser's own alone."),
+  inspect: z.union([z.string(), z.number()]).optional().describe("With attach to an Electron app: its main process's Node debugger port or address (from --inspect=<port>), for electron steps."),
   browser: z.string().optional().describe("The browser to launch: chrome (default), edge, brave, chromium, another installed Chromium browser's name or path; or webkit (Safari's engine) or firefox, which are Playwright's own builds."),
   browserArgs: z.array(z.string()).optional().describe("Extra command-line flags for the browser it launches."),
   headed: z.boolean().optional().describe("Give the browser a window on the screen (default: headless)."),
@@ -277,7 +279,7 @@ Only addresses can conflict. Whatever answers at a session's address is used as 
 
 The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks. It reads a whole page, or one section: { "section": "shot" } is one step's forms and options.
 
-To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). To do anything the built-in steps don't, run a js, playwright or cdp step. Sessions end when this weblab exits; nothing is written into the project.`;
+To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (inspect). Sessions end when this weblab exits; nothing is written into the project.`;
 
 export function createServer(version: string): McpServer {
   const server = new McpServer({ name: "weblab", version }, { instructions: INSTRUCTIONS });
@@ -323,7 +325,7 @@ export function createServer(version: string): McpServer {
         params: z.record(z.string(), z.unknown()).optional().describe("Values for ${name} placeholders in the steps or the file, and handed to code as params."),
         timeout: z.number().optional().describe("How long each step may take, in milliseconds, unless the step says (default: the session's)."),
         wait: z.number().optional().describe(`How long this call waits before it replies with the steps still running, in milliseconds (default: ${DEFAULT_WAIT_MS}).`),
-      }),
+      }).strict(),
     },
     ({ session: on = MAIN, steps, file, params, timeout, wait }) =>
       answering(async () => {
@@ -397,7 +399,7 @@ export function createServer(version: string): McpServer {
       title: "End session",
       description:
         "End a session: its browser closes, a video still being recorded and its trace are written, and a server weblab started for it stops if no other session is using it. With no session named, ends every session.",
-      inputSchema: z.object({ session: z.string().optional().describe("The session to end (default: all of them).") }),
+      inputSchema: z.object({ session: z.string().optional().describe("The session to end (default: all of them).") }).strict(),
     },
     ({ session: name }) =>
       answering(async () => {
@@ -427,7 +429,7 @@ export function createServer(version: string): McpServer {
     {
       title: "List sessions",
       description: "The sessions that are open: each one's name, address, where its page is now, and whether steps are running on it.",
-      inputSchema: z.object({}),
+      inputSchema: z.object({}).strict(),
       annotations: { readOnlyHint: true },
     },
     () =>
@@ -461,7 +463,7 @@ export function createServer(version: string): McpServer {
       inputSchema: z.object({
         page: z.enum(pages).optional().describe("The page to read whole, or with section, the page to look in."),
         section: z.string().optional().describe(`One section: a step's name ("mock", which gives that step's forms and options), or a heading as it is written or as a link's anchor ("Refs", "steps#refs").`),
-      }),
+      }).strict(),
       annotations: { readOnlyHint: true },
     },
     ({ page, section }) =>

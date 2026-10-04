@@ -65,6 +65,7 @@ const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   css: { keys: [] },
   playwright: { keys: ["code", "file"] },
   cdp: { keys: ["method", "params"] },
+  electron: { keys: ["code", "file"] },
   new: { keys: SESSION_KEYS },
 };
 
