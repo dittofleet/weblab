@@ -6,11 +6,11 @@ Most steps are shortcuts for what is done all the time. Four run code (`js`, `cs
 
 | Group | Steps |
 | --- | --- |
-| [Getting around](#getting-around) | `goto`, `reload`, `back`, `tab`, `viewport`, `colorScheme` |
+| [Getting around](#getting-around) | `goto`, `reload`, `ready`, `back`, `tab`, `viewport`, `colorScheme` |
 | [Pointer and keyboard](#pointer-and-keyboard) | `click`, `hover`, `drag`, `scroll`, `press`, `type` |
 | [Forms](#forms) | `fill`, `select`, `check`, `upload` |
 | [Checking](#checking) | `wait`, `expect` |
-| [Reading and capturing](#reading-and-capturing) | `look`, `shot` |
+| [Reading and capturing](#reading-and-capturing) | `look`, `shot`, `video` |
 | [Around the page](#around-the-page) | `dialog`, `mock`, `saveState` |
 | [Code](#code) | `js`, `css`, `playwright`, `cdp` |
 | [More than one session](#more-than-one-session) | `new`, `end` |
@@ -113,12 +113,13 @@ A ref that can't be current fails at once, saying to look again, rather than wai
 | --- | --- | --- |
 | `goto` | `"/path"` or `{ url, ready }` | Opens a path or URL, then waits for the app to be ready. A path is resolved against the session's address; a query string is a good way to pose a state. `ready` is `false` to skip the wait, or `{ selector \| text \| js, timeout }` for this step alone. A page that ends up on another site isn't waited for. A page that answers 400 or above is noted (`note  /admin answered 403`). |
 | `reload` | `true` or `{ ready }` | Reloads the page, then waits for the app to be ready. |
+| `ready` | `true` or `{ selector \| text \| js, timeout }` | Waits for the app to be ready, without going anywhere: for a page still loading, like an app's window that was just opened, or a cold dev server's first build. |
 | `back` | `true` | Goes back in the tab's history. Fails if there is no page before this one. |
 | `tab` | `1`, `"new"`, `"last"`, `{ open: url }`, `{ close: true }` or `{ close: 1 }` | Switches which tab steps act on. Tabs count from 0. `"new"` waits for a tab the steps haven't been on yet, such as one a click just opened. `"last"` is the newest tab. `open` opens a tab at a path or URL. `close` closes the current tab (steps then act on the newest one left) or a numbered one. |
 | `viewport` | `"800x600"` or `{ width, height }` | Resizes the page. |
 | `colorScheme` | `"dark"`, `"light"` or `"none"` | Switches the `prefers-color-scheme` the page sees, with no reload. An app with a theme switch of its own needs that switch instead. |
 
-Ready means what the session's `ready` option says, else: `#root` or `#app` has children (where a React or Vue app mounts), or, with neither on the page, the page has loaded.
+Ready means what the session's `ready` option says, else: `#root` or `#app` has children (where a React or Vue app mounts), or, with neither on the page, the page has loaded. It is waited for up to a minute, unless `ready` gives a `timeout`, since a cold dev server can take that long.
 
 Tabs belong to one session and share its cookies. A second user is a second session, not a tab: see [Sessions](sessions.md).
 
@@ -133,7 +134,7 @@ Tabs belong to one session and share its cookies. A second user is a second sess
 | `press` | `"Enter"` or `{ key, hold, ...target }` | Presses a key or chord (`"?"`, `"Meta+k"`, `"Shift+Tab"`) on the page, or on one element. `hold` keeps it down that many milliseconds before letting go, for keys that act while held; it sends one keydown, not the repeats a held key sends by hand. |
 | `type` | `"text"` or `{ value, delay, ...target }` | Types key by key into whatever has focus, or into a target. `fill` sets a value at once; `type` is for fields that react to each key. `delay` is milliseconds between keys. |
 
-In a recorded session, a drawn cursor glides to each click, hover and drag, and each action is followed by a short pause, so the video can be followed. The cursor is hidden while a `shot` is taken, so it is never in a screenshot.
+While a [video](#recording-a-video) is being recorded, a drawn cursor glides to each click, hover and drag, and each action is followed by a short pause, so the video can be followed. The cursor is hidden while a `shot` is taken, so it is never in a screenshot.
 
 ## Forms
 
@@ -191,6 +192,7 @@ A `url`, `title`, `request` or `console` is matched one of three ways:
 | --- | --- | --- |
 | `look` | `true`, `"name"`, or `{ as, format, depth, ...target }` | Reads the page, or one element, as text, and hands it back in the reply. Given a name (`as`), it is also kept in `looks/`. `format` is `refs` (the accessibility tree with refs to act on; the default), `plain` (the tree without refs, shorter), `text` (the words as a reader sees them: best for long articles and code), or `html` (all the markup, hidden parts included, which can be large). `depth` keeps only the top levels of the tree. |
 | `shot` | `"name"` or `{ as, fullPage, animations, screen, matches, tolerance, ...target }` | Screenshots the viewport, the full page (`fullPage`), or one element, to `shots/<session>-<name>.png`, and hands it back as an image. With `screen`, it captures the real screen instead. With `matches`, it is held to a screenshot taken before. |
+| `video` | `"start"`, `"stop"`, or `{ as, ready }` to start | Records the tab steps act on, from `start` until `stop` or the end of the session. See [Recording a video](#recording-a-video). |
 
 `as` is the name a `look` or `shot` is kept under; `name` beside `role` is an element's accessible name.
 
@@ -230,6 +232,31 @@ A page, element or window capture holds this browser's window and the menus it h
 - Not `fullPage`: the screen shows only what is in the window.
 
 A session with a window wakes the display and keeps it awake while weblab runs, brings its window to the front at each `click` and `press` (the OS opens its menus only for the window in front), and draws at the display's own pixel scale unless `viewport` gives one, so what the OS draws lines up with the page. Another window coming to the front closes an open menu, so open it and capture it in the same `run`.
+
+### Recording a video
+
+A video holds what happens between `{ "video": "start" }` and `{ "video": "stop" }`, so set things up first (sign in, open the right page) and start where the part worth watching begins:
+
+`run`
+
+```json
+{ "steps": [{ "goto": "/cart" }, { "video": "start" }, { "click": "text=Checkout" }, { "expect": "Order placed" }, { "video": "stop" }] }
+```
+
+```text
+ok    1 goto (412ms)
+ok    2 video (281ms)
+ok    3 click (1544ms)
+ok    4 expect (35ms)
+ok    5 video (2101ms)
+file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
+```
+
+- Starting waits for the app to be ready first, as `goto` does, so a video never opens on a blank page that is still loading. `ready` is `false` to start at once, or `{ selector | text | js, timeout }` for what to wait for.
+- `as` names the file: `{ "video": { "as": "checkout" } }` is `videos/<session>-checkout.webm`. Without it, the first take is `videos/<session>.webm` and later ones `<session>-take2.webm`, and so on.
+- Stopping holds the last frame for two seconds, so the outcome can be read, and hands back the file. A take still going when its session ends is written then, and `end` names it.
+- A tab the steps move to with `tab` during a take is recorded too, to a file of its own (`<take>-tab1.webm`). Closing it with `tab` keeps its file, but a tab the page closes by itself takes its recording with it.
+- It works the same in every browser, and in a browser or app the session attached to.
 
 ## Around the page
 

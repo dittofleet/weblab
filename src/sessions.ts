@@ -7,14 +7,14 @@
 // with `on`. A step can open a session too (`new`), which is the same
 // as any other and stays until it is ended.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { execFileSync } from "node:child_process";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { type CDPSession, type Page, type Video } from "playwright-core";
+import { type CDPSession, type Page } from "playwright-core";
 import { originOf, resolveApp } from "./app.ts";
 import { createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
-import { CURSOR, withoutCursor } from "./cursor.ts";
-import { briefError, SetupError, StepFailure, stepError, UsageError } from "./errors.ts";
+import { withoutCursor } from "./cursor.ts";
+import { SetupError, StepFailure, stepError, UsageError } from "./errors.ts";
+import { filming } from "./film.ts";
 import { record, type Recorder } from "./recorder.ts";
 import { actionOf, checkTimeout, stepBase, stepOrigin } from "./script.ts";
 import { keepDisplayAwake, TRACK_PAGE_ON_SCREEN } from "./screen.ts";
@@ -27,8 +27,6 @@ import type { ActionContext, App, SessionHandle, SessionOptions, Settings, Step,
 import { escapeRegExp, nearest, viewportSize } from "./util.ts";
 
 const DEFAULT_STEP_TIMEOUT = 10_000;
-// Held on the last frame of a video so the outcome is readable.
-const VIDEO_TAIL_MS = 2000;
 
 /** The name a session gets when none is given and none is open yet. */
 export const MAIN = "main";
@@ -42,7 +40,7 @@ export type Job = {
   timeout?: number;
   steps: StepResult[];
   shots: string[];
-  /** Other files the steps wrote: downloads, text snapshots, videos of sessions they ended. */
+  /** Other files the steps wrote: downloads, text snapshots, videos. */
   files: string[];
   /** Things worth saying that belong to no one step: a server started, a session ended. */
   lines: string[];
@@ -59,7 +57,7 @@ export const newJob = (on: string, given: Partial<Pick<Job, "params" | "timeout"
 });
 
 /** What a session left when it ended. */
-export type Ended = { name: string; dir: string; video?: string; trace?: string; server?: string };
+export type Ended = { name: string; dir: string; videos?: string[]; trace?: string; server?: string };
 
 export type Session = {
   name: string;
@@ -72,7 +70,6 @@ export type Session = {
   server: Server | null;
   attached: boolean;
   headed: boolean;
-  video: boolean;
   /** Where its files go. */
   dir: string;
   consoleLog: string;
@@ -224,6 +221,8 @@ function inherited(parent: Driver): SessionOptions {
 
 function checked(options: SessionOptions): SessionOptions {
   const unknown = Object.keys(options).find((key) => !SESSION_KEYS.includes(key));
+  // Recording was once an option here, and is a step now, so it can start once the app has loaded.
+  if (unknown === "video") throw new UsageError(`new: no option "video". Record with the video step once the session is open: { "video": "start" }, then { "video": "stop" }`);
   if (unknown !== undefined) {
     const guess = nearest(unknown, SESSION_KEYS);
     throw new UsageError(`new: no option "${unknown}"${guess === undefined ? "" : ` (did you mean "${guess}"?)`}; it takes ${SESSION_KEYS.join(", ")}`);
@@ -339,18 +338,12 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     const { browser, release } = takeBrowser(app, headed);
     undo.push(release);
 
-    const video = options.video === true;
-    // A browser weblab launches records every tab from the start. One it
-    // joined is recorded from here on, by filming the tab it drives.
-    const filmed = video && browser.attached;
-    const captureDir = join(dir, "videos", `.capture-${files}`);
     const size = { ...DEFAULT_VIEWPORT, ...settings.viewport };
     const { context, page: existing, close } = await browser.open({
       viewport: size,
       viewportGiven: settings.viewport !== undefined,
       scaleGiven: settings.viewport?.deviceScaleFactor !== undefined,
       settings: { ...settings.context, ...(state === undefined ? {} : { storageState: signInPath(app, state) }) },
-      videoDir: video && !filmed ? captureDir : undefined,
     });
     undo.push(close);
 
@@ -375,20 +368,7 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       },
     });
     undo.push(() => recorder.stop());
-    // In a browser weblab joined, only the tab it drives gets the cursor.
-    if (video) await (filmed ? firstTab : context).addInitScript(CURSOR);
-    const film = join(dir, "videos", `${files}.webm`);
-    if (filmed) {
-      mkdirSync(join(dir, "videos"), { recursive: true });
-      // The tab is already showing something, so the cursor is put in it as it is.
-      await firstTab.evaluate(CURSOR).catch(() => {});
-      // The browser is left as it was found.
-      undo.push(() => firstTab.evaluate(() => document.querySelector("[data-weblab-cursor]")?.remove()));
-      const frame = await firstTab.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })).catch(() => undefined);
-      await firstTab.screencast.start({ path: film, ...(frame === undefined || frame.width === 0 ? {} : { size: frame }) }).catch((error) => {
-        throw new SetupError(`could not record the attached tab: ${briefError(error)}`);
-      });
-    }
+    const film = filming(dir, files, say);
     if (browser.windowed) {
       // For captures of the real screen: see screen.ts.
       await context.addInitScript(TRACK_PAGE_ON_SCREEN);
@@ -428,7 +408,10 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
         return connection.send(method as never, params as never);
       },
       windowed: browser.windowed,
-      video,
+      get video() {
+        return film.rolling;
+      },
+      film,
       mouse: { x: size.width / 2, y: size.height / 2 },
       artifacts: {
         dir,
@@ -486,7 +469,6 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       server,
       attached: browser.attached,
       headed,
-      video,
       dir,
       consoleLog,
       networkLog,
@@ -507,20 +489,8 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
             await context.tracing.stop(keep ? { path } : {});
             if (keep) kept.trace = path;
           }
-          if (filmed) {
-            await firstTab.waitForTimeout(VIDEO_TAIL_MS).catch(() => {});
-            await firstTab.screencast.stop().catch(() => {});
-            if (existsSync(film)) {
-              kept.video = film;
-              mp4Beside(film);
-            }
-          } else if (video) {
-            await ctx.page.waitForTimeout(VIDEO_TAIL_MS).catch(() => {});
-            const recordings = recorder.tabs.map((tab) => tab.video());
-            await close();
-            kept.video = await saveVideos(recordings, dir, files);
-            rmSync(captureDir, { recursive: true, force: true });
-          }
+          // A take still being recorded ends with the session.
+          if (film.rolling) kept.videos = await film.stop(ctx.page);
         } finally {
           await unwind();
         }
@@ -587,7 +557,7 @@ function report(ended: Ended): void {
 /** What a session left when it ended, a line for each thing. */
 export const endedLines = (ended: Ended): string[] => [
   `ended ${ended.name}`,
-  ...(ended.video === undefined ? [] : [`video ${ended.video}`]),
+  ...(ended.videos ?? []).map((path) => `video ${path}`),
   ...(ended.trace === undefined ? [] : [`trace ${ended.trace}`]),
   ...(ended.server === undefined ? [] : [ended.server]),
 ];
@@ -736,44 +706,10 @@ export async function runStep(job: Job, given: Step): Promise<{ ok: boolean; rec
       const screenshot = where.ctx.artifacts.path("shots", `FAIL-${which}`, "png");
       // The page may be gone; the failure stands without its picture.
       const { page } = where.ctx;
-      const shot = await withoutCursor(page, where.video, () => page.screenshot({ path: screenshot, timeout: 5000 })).then(() => screenshot, () => undefined);
+      const shot = await withoutCursor(page, where.ctx.video, () => page.screenshot({ path: screenshot, timeout: 5000 })).then(() => screenshot, () => undefined);
       if (shot !== undefined) entry.screenshot = shot;
     }
     return { ok: false, record: entry };
-  }
-}
-
-// The first tab's recording is the session's video; a tab opened along
-// the way gets its own file beside it.
-async function saveVideos(recordings: (Video | null)[], dir: string, name: string): Promise<string | undefined> {
-  let first: string | undefined;
-  for (const [index, recording] of recordings.entries()) {
-    if (recording === null) continue;
-    const path = join(dir, "videos", index === 0 ? `${name}.webm` : `${name}-tab${index}.webm`);
-    // Waits until the recording is written out in full.
-    const saved = await recording.saveAs(path).then(() => true, () => false);
-    await recording.delete().catch(() => {});
-    if (!saved || !existsSync(path)) continue;
-    if (index === 0) first = path;
-    else jobs.getStore()?.files.push(path);
-    mp4Beside(path);
-  }
-  return first;
-}
-
-// Optional: with FFMPEG set to an ffmpeg binary an mp4 lands beside the webm.
-function mp4Beside(webm: string): void {
-  const ffmpeg = process.env.FFMPEG;
-  if (!ffmpeg) return;
-  try {
-    execFileSync(ffmpeg, [
-      "-y", "-loglevel", "error", "-i", webm,
-      "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-      webm.replace(/\.webm$/, ".mp4"),
-    ]);
-  } catch (error) {
-    // The webm is the recording; the mp4 is a convenience.
-    say(`mp4 not written: ${briefError(error)}`);
   }
 }
 

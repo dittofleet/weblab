@@ -8,6 +8,7 @@ import { StepFailure, UsageError } from "../errors.ts";
 import { captureScreen, SCREEN_AREAS, type ScreenArea } from "../screen.ts";
 import type { Action, ActionContext } from "../types.ts";
 import { arg, bad, isObject, step } from "./args.ts";
+import { readyArg, waitReady } from "./navigation.ts";
 import { ariaTree, hasTarget, locate } from "./target.ts";
 
 
@@ -160,5 +161,22 @@ export const captureSteps: Record<string, Action> = {
     }
     ctx.artifacts.add(path);
     if (before !== undefined) await compare(ctx, path, before, String(as), tolerance ?? 0);
+  }),
+
+  video: step(`record the tab steps act on, from once the app is ready until stopped: "start", "stop", or { as, ready } to start one named`, async (ctx, args) => {
+    if (args === "stop") {
+      if (!ctx.video) ctx.fail(`nothing is being recorded. Start with { "video": "start" }`);
+      for (const path of await ctx.film.stop(ctx.page)) ctx.artifacts.addFile(path);
+      return;
+    }
+    if (args !== "start" && !isObject(args)) bad("video", `"start", "stop", or { as, ready } to start`);
+    const { as, ready } = isObject(args) ? args : {};
+    if (as !== undefined && typeof as !== "string") bad("video", "as to be what to call the video");
+    if (ctx.video) ctx.fail(`a video is being recorded already. Stop it first with { "video": "stop" }`);
+    // Not a blank page that is still loading: the video starts with the app on it.
+    await waitReady(ctx, readyArg("video", ready));
+    await ctx.film.start(ctx.page, as);
+    // The drawn cursor is where the pointer is, from the first frame.
+    await ctx.page.mouse.move(ctx.mouse.x, ctx.mouse.y);
   }),
 };

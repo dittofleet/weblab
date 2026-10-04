@@ -494,10 +494,18 @@ test("params fill steps and files, code hands back values, and a shot is held to
   await lab.close();
 });
 
-test("a session is recorded when asked, and its video is written when it ends", async () => {
+test("a video is recorded from when it starts, with the app ready, until it stops or the session ends", async () => {
   const lab = weblab();
   const dir = out();
-  await lab.tool("new", { ...BASE, video: true, out: dir });
+  // Recording was an option of new, and is a step now: the option says so.
+  assert.match((await lab.tool("new", { ...BASE, video: true, out: dir })).text, /no option "video"\. Record with the video step/);
+  await lab.tool("new", { ...BASE, out: dir });
+  assert.match((await lab.tool("run", { steps: [{ video: "stop" }] })).text, /FAIL {2}1 video: nothing is being recorded/);
+  // On a page that hasn't mounted yet, ready and video both wait for the app.
+  const mounted = "document.querySelector('#root').childElementCount > 0";
+  const started = await lab.tool("run", { steps: [{ goto: { url: "/", ready: false } }, { ready: true }, { js: mounted }, { goto: { url: "/", ready: false } }, { video: "start" }, { js: mounted }, { video: "start" }] });
+  assert.match(started.text, /ok {4}3 js \(\d+ms\)\ntrue\n/);
+  assert.match(started.text, /ok {4}6 js \(\d+ms\)\ntrue\nFAIL {2}7 video: a video is being recorded already/);
   await lab.tool("run", { steps: [{ click: "#inc" }, { hover: "#ask" }] });
   // The cursor drawn for the recording isn't in a screenshot: it matches one from a session that has no cursor.
   await lab.tool("new", { ...BASE, name: "plain", out: dir });
@@ -505,9 +513,19 @@ test("a session is recorded when asked, and its video is written when it ends", 
   const same = await lab.tool("run", { steps: [{ goto: "/other" }, { hover: "h1" }, { js: "getComputedStyle(document.querySelector('[data-weblab-cursor]')).visibility" }, { shot: { as: "other", matches: join(dir, "shots", "plain-other.png") } }] });
   assert.equal(same.isError, false, same.text);
   assert.match(same.text, /"visible"/);
-  const ended = await lab.tool("end");
-  assert.match(ended.text, /video .*videos\/main\.webm/);
+  // Stopped, the video is written, and the page is left without the cursor, in its frames too.
+  const cursors = "[document, document.querySelector('#frame').contentDocument].map((doc) => doc.querySelector('[data-weblab-cursor]') !== null)";
+  const stopped = await lab.tool("run", { steps: [{ goto: "/" }, { js: cursors }, { video: "stop" }, { js: cursors }] });
+  assert.match(stopped.text, /ok {4}2 js \(\d+ms\)\n\[\s*true,\s*true\s*\]\n[\s\S]*ok {4}4 js \(\d+ms\)\n\[\s*false,\s*false\s*\]\n[\s\S]*file {2}.*videos\/main\.webm/);
   assert.ok(existsSync(join(dir, "videos", "main.webm")));
+  // A tab the steps move to during a take is recorded too, even one closed before the take ends.
+  const tabs = await lab.tool("run", { steps: [{ goto: "/" }, { video: "start" }, { click: "#pop" }, { tab: "new" }, { tab: { close: true } }, { video: "stop" }] });
+  assert.match(tabs.text, /file {2}.*videos\/main-take2\.webm\nfile {2}.*videos\/main-take2-tab1\.webm/);
+  // A take still going when its session ends is written then.
+  await lab.tool("run", { steps: [{ video: { as: "again" } }, { click: "h1" }] });
+  const ended = await lab.tool("end", { session: "main" });
+  assert.match(ended.text, /video .*videos\/main-again\.webm/);
+  assert.ok(existsSync(join(dir, "videos", "main-again.webm")));
   await lab.close();
 });
 
@@ -539,6 +557,9 @@ test("two running apps are two sessions, joined by their ports and left as they 
 
     const ran = await lab.tool("run", { session: "a", steps: [{ click: "text=Press" }, { js: "document.querySelector('button').textContent" }, { js: "document.title", on: "b" }, { js: "document.querySelector('button').textContent", on: "b" }] });
     assert.match(ran.text, /"pressed"\nok {4}3 js on b \(\d+ms\)\n"Device B"\nok {4}4 js on b \(\d+ms\)\n"Press"/);
+    // A running app's tab is recorded too, and left without the cursor drawn for it.
+    const filmed = await lab.tool("run", { session: "a", steps: [{ video: "start" }, { hover: "button" }, { video: "stop" }, { js: "document.querySelector('[data-weblab-cursor]') === null" }] });
+    assert.match(filmed.text, /ok {4}4 js \(\d+ms\)\ntrue\n[\s\S]*file {2}.*videos\/a\.webm/);
     assert.match((await lab.tool("new", { name: "c", attach: a.port, browser: "edge" })).text, /browser can't be used with attach/);
     assert.match((await lab.tool("new", { name: "c", attach: a.port, tab: "nonesuch" })).text, /no tab in the attached browser matches "nonesuch"/);
 

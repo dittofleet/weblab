@@ -28,11 +28,10 @@ Opens a session: a browser of its own (its own cookies, storage and tabs) pointi
 | `state` | Start signed in: the name a `saveState` step saved cookies and storage under. | none |
 | `viewport` | The page's size: `"1440x900"`, `"390x844@3"` with a pixel scale, or `{ "width", "height", "deviceScaleFactor" }`. | `1440x900` at 2x |
 | `context` | Playwright [browser context options](https://playwright.dev/docs/api/class-browser#browser-new-context), as given: `{ "colorScheme": "dark", "locale": "de-DE", "isMobile": true, "permissions": [...] }`. | none |
-| `video` | Record the session. The video is written when the session ends. | `false` |
 | `trace` | Keep a Playwright trace, written when the session ends: `true`, or `"on-failure"` to keep it only if a step on this session failed. | `false` |
 | `timeout` | How long each step may take, in milliseconds, unless the run or the step says otherwise. | `10000` |
 | `ignore` | Regular expressions. Console output and failed requests that match are left out of the console log, the reply, and `noErrors` checks. | none |
-| `ready` | What `goto` and `reload` wait for before the next step: `{ "selector" }`, `{ "text" }` or `{ "js" }` (an expression that turns true), each with an optional `timeout`. | `#root` or `#app` has children, or else the page has loaded |
+| `ready` | What `goto`, `reload`, the `ready` step and a `video` starting wait for: `{ "selector" }`, `{ "text" }` or `{ "js" }` (an expression that turns true), each with an optional `timeout`. | `#root` or `#app` has children, or else the page has loaded |
 | `out` | The directory this session's screenshots, logs and videos go to. | A shared directory under the temp directory; see [Files](#files) |
 
 Some combinations are refused with a message saying why: `tab` and `newTab` need `attach`; `browser`, `browserArgs`, `persist`, `state`, `context` and `headed` can't be used with `attach`; `persist` and `state` can't be used together; a name that is already open is refused until that session ends.
@@ -90,7 +89,7 @@ The project is the nearest directory at or above `dir` with a `package.json`, lo
 - No server is started unless `address` or `start` is given.
 - `viewport` resizes the tab only when given.
 - When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups) and lets go of the browser, which keeps running.
-- With `video`, the tab being driven is recorded from when the session attaches.
+- A `video` step records the tab being driven, once it is ready: an app still loading isn't filmed blank.
 
 [Sessions](sessions.md#running-browsers-and-electron-apps) has more, including how to start a browser or app with a port.
 
@@ -139,7 +138,7 @@ In order, a reply holds:
 2. Each step: `ok    <n> <action> (<ms>ms)`, or `FAIL  <n> <action>: <why>`. A step on another session says so (`ok    3 js on b (4ms)`), and a step an `include` brought in names its file (`ok    5 fill (sign-in.json step 1)`).
 3. Under a step, what it handed back: a `look`'s text as it is, between blank lines, and any other value (from `js`, `playwright`, `cdp`) as JSON. A value longer than 8000 characters is cut short, with a count of what was left out.
 4. Under a step, `note  ...` for something worth knowing about a step that passed: a `goto` whose page answered 404, lazy images still loading when a full-page shot was taken.
-5. `shot  <path>` for each screenshot, and `file  <path>` for other files the steps wrote (a named `look`, the video of an extra tab).
+5. `shot  <path>` for each screenshot, and `file  <path>` for other files the steps wrote (a named `look`, a video `stop` wrote).
 6. `url` and `title`, when they changed since the last reply about this session.
 7. The tabs, as `tab 0* <url>`, `tab 1  <url>` (the `*` marks the one steps act on), when there is more than one and they changed.
 8. `console since the last reply:` and what the page logged since then: console messages, page errors, failed requests, responses with an error status, and dialogs. At most the last 40 lines are shown, with the path of the full log when there were more. The same line repeated shows once with a count, `(x12)`.
@@ -181,7 +180,7 @@ Calls on one session run one after another, in the order they came. Calls on dif
 
 ## end
 
-Ends a session: its browser closes, its video and trace are written, and a server weblab started for it stops if no other session is using it.
+Ends a session: its browser closes, a video still being recorded and its trace are written, and a server weblab started for it stops if no other session is using it.
 
 | Argument | What it says | Default |
 | --- | --- | --- |
@@ -240,7 +239,7 @@ Every file is named after its session, so sessions sharing a directory never wri
 | `looks/<session>-<name>.yml` | A `look` given a name (`.txt` for `format: "text"`, `.html` for `format: "html"`). |
 | `console/<session>.log` | Each step as it ran, everything the page logged, page errors, failed requests, error responses, dialogs and how they were answered, and why a step failed. |
 | `network/<session>.log` | Every response (status, method, URL, with `(mocked)` on those a `mock` answered), and each WebSocket opened and closed. |
-| `videos/<session>.webm` | With `video`. A tab opened along the way gets `<session>-tab<n>.webm`. With `FFMPEG` set, an `.mp4` lands beside each. |
+| `videos/<session>.webm` | A `video` step's first take. Later ones are `<session>-take<n>.webm`, or `<session>-<as>.webm` when named. A tab the steps moved to during a take gets `-tab<n>` after its name. With `FFMPEG` set, an `.mp4` lands beside each. |
 | `traces/<session>.zip` | With `trace`. Open it at [trace.playwright.dev](https://trace.playwright.dev). |
 | `server-<host>-<port>.log` | The output of a server weblab started. |
 

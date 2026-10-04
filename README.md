@@ -31,7 +31,7 @@ In a client's JSON config, the server entry is `{ "command": "weblab" }`. Sessio
 | --- | --- |
 | `new` | Opens a session: a browser of its own, with a name, pointing at an address. Starts the app's dev server if nothing answers there. |
 | `run` | Runs steps on a session, in order, stopping at the first that fails. Replies with each step's outcome, what it handed back, and its screenshots. |
-| `end` | Ends one session, or all of them. Writes videos and traces, and stops a server nobody else is using. |
+| `end` | Ends one session, or all of them. Writes a video still recording and traces, and stops a server nobody else is using. |
 | `list` | The sessions that are open, where each one is, and whether steps are running on it. |
 | `docs` | The reference pages below, readable from inside the client. They are also offered as MCP resources (`weblab://docs/<page>`). |
 

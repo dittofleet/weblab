@@ -47,8 +47,6 @@ export type Recorder = {
   logs: ConsoleEntry[];
   /** Every response every tab has had. */
   responses: ResponseEntry[];
-  /** Every tab there has been, closed ones too, in the order they came. */
-  tabs: Page[];
   /** How many documents a tab has loaded. */
   loads(tab: Page): number;
   /** What a tab has logged and received since it last loaded a document. */
@@ -180,7 +178,6 @@ export function record(
   return {
     logs,
     responses,
-    tabs,
     loads: (tab) => loadedAt.get(tab)?.count ?? 0,
     sinceLoad(tab) {
       const at = loadedAt.get(tab) ?? { logs: 0, responses: 0 };

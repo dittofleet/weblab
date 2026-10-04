@@ -9,7 +9,7 @@ import { checkSteps, EXPECT_KEYS } from "./checks.ts";
 import { codeSteps } from "./code.ts";
 import { formSteps } from "./forms.ts";
 import { inputSteps } from "./input.ts";
-import { navigationSteps } from "./navigation.ts";
+import { navigationSteps, READY_KEYS } from "./navigation.ts";
 import { SESSION_KEYS, sessionSteps } from "./sessions.ts";
 import { TARGET_KEYS } from "./target.ts";
 import { BESIDE_ACTION } from "./args.ts";
@@ -33,6 +33,7 @@ const POINT = ["x", "y"];
 const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   goto: { keys: ["url", "ready"] },
   reload: { keys: ["ready"] },
+  ready: { keys: READY_KEYS },
   back: { keys: [] },
   tab: { keys: ["open", "close"] },
   viewport: { keys: ["width", "height"] },
@@ -51,6 +52,7 @@ const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   wait: { keys: ["ms"] },
   look: { keys: ["as", "format", "depth"], target: true },
   shot: { keys: ["as", "fullPage", "animations", "screen", "matches", "tolerance"], target: true },
+  video: { keys: ["as", "ready"] },
   mock: { keys: ["url", "json", "body", "abort", "off", "status", "contentType"] },
   dialog: { keys: ["accept", "text"] },
   saveState: { keys: ["name"] },
