@@ -205,6 +205,8 @@ export type StepResult = {
   status: "passed" | "failed";
   ms: number;
   error?: string;
+  /** It never ran: it was written wrong, or named what isn't there. */
+  refused?: boolean;
   /** What the step handed back: a code step's return value. */
   value?: unknown;
   /** The session it ran on, when not the one the run was for. */

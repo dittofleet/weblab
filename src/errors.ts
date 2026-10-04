@@ -13,6 +13,13 @@ const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 
 export const stripAnsi = (text: string) => text.replace(ANSI, "");
 
+/** Text cut to `max` characters, saying how much more there was. */
+export const cut = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, max)}... (${text.length - max} more characters)`;
+
+// How much of an error a reply gives: an assertion's diff, not a dump.
+const MAX_ERROR = 2000;
+
 // Playwright errors carry a call log after the first line, which
 // drowns the one sentence an agent needs.
 export function briefError(error: unknown): string {
@@ -36,9 +43,10 @@ export function tail(file: string, count = 3): string {
 const BLOCKED = /intercepts pointer events$|^element is not |^element is outside of the viewport$|^element was detached/;
 
 /**
- * A failed step's reason in one line. Playwright puts what it was doing
- * in a call log under its first line; a timeout is only useful with
- * the element it was waiting for, so that comes along.
+ * A failed step's reason. Playwright puts what it was doing in a call
+ * log under its first line, so its errors are said in one line; a
+ * timeout is only useful with the element it was waiting for, so that
+ * comes along. Any other error is said whole, less stack lines.
  */
 export function stepError(error: unknown): string {
   const message = stripAnsi(error instanceof Error ? error.message : String(error));
@@ -48,7 +56,7 @@ export function stepError(error: unknown): string {
   // lines (an assertion's diff), less the stack some messages carry.
   if (!message.includes("\nCall log:")) {
     const whole = message.split("\n").filter((line) => !/^\s+at /.test(line)).join("\n").trim();
-    return whole.length > 2000 ? `${whole.slice(0, 1997)}...` : whole;
+    return cut(whole, MAX_ERROR);
   }
   const [first = ""] = message.split("\n");
   const log = message

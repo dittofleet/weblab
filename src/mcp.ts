@@ -162,9 +162,9 @@ async function where(name: string, always: boolean): Promise<string[]> {
 }
 
 // Text, with each picture as an image right after the line that names it.
-// An error is a call that couldn't be done. A step that ran and failed is
-// a result: its picture is what the reader needs, and some clients show
-// an error's text alone.
+// An error is a call that couldn't be done, a step that never ran
+// included. A step that ran and failed is a result: its picture is what
+// the reader needs, and some clients show an error's text alone.
 function result(lines: string[], isError = false): Result {
   const content: Content[] = [];
   let text: string[] = [];
@@ -305,7 +305,7 @@ export function createServer(version: string): McpServer {
         // A newer release is said once, where a session starts.
         const note = noted ? null : updateNote();
         noted ||= note !== null;
-        return result([`session ${describe(opened)}`, `files ${opened.dir}`, ...lines, ...(await where(job.on, true)), ...(note === null ? [] : ["", note])]);
+        return result([`session ${describe(opened)}`, `files ${opened.dir}`, ...lines, ...(await where(job.on, true)), ...(note === null ? [] : ["", note])], job.steps.some((step) => step.refused));
       }),
   );
 
@@ -334,7 +334,11 @@ export function createServer(version: string): McpServer {
 
         const deadline = Date.now() + (wait ?? DEFAULT_WAIT_MS);
         const lines: string[] = [];
-        const tell = (running: Running) => lines.push(...news(running));
+        let refused = false;
+        const tell = (running: Running) => {
+          lines.push(...news(running));
+          refused ||= running.job.steps.some((step) => step.refused);
+        };
         const stillRunning = (running: Running) => {
           const now = running.job.steps.at(-1);
           lines.push(`still running${now === undefined ? "" : `: step ${now.index} (${now.action})`}, ${Math.round((Date.now() - running.startedAt) / 1000)}s in. Call run on "${on}" again, with no steps, to wait for the rest.`);
@@ -359,7 +363,7 @@ export function createServer(version: string): McpServer {
         if (given === null) {
           if (!hadLeft) return result([`run: nothing to run on "${on}": give steps or file`], true);
           if (waitingOn !== undefined) stillRunning(waitingOn);
-          return result([...lines, ...(waitingOn === undefined ? await where(on, false) : [])]);
+          return result([...lines, ...(waitingOn === undefined ? await where(on, false) : [])], refused);
         }
 
         const job = newJob(on, { params, timeout });
@@ -372,16 +376,16 @@ export function createServer(version: string): McpServer {
           left.push(running);
           stillRunning(waitingOn);
           lines.push("The steps given now are queued after it.");
-          return result(lines);
+          return result(lines, refused);
         }
         const finished = await settled(running, deadline - Date.now());
         tell(running);
         if (!finished) {
           left.push(running);
           stillRunning(running);
-          return result(lines);
+          return result(lines, refused);
         }
-        return result([...lines, ...(await where(on, false))]);
+        return result([...lines, ...(await where(on, false))], refused);
       }),
   );
 

@@ -2,7 +2,7 @@
 
 This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages. It lists every argument, what each reply holds, how weblab finds or starts the app, and where files go.
 
-A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when the call could not be done, and the text says why. A step that ran and failed is not an error but a result: its `FAIL` line says why, and its screenshot comes with it, which a client showing an error's text alone would leave out.
+A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when the call could not be done, a step that never ran (written wrong, or on a session that isn't open) included, and the text says why. A step that ran and failed is not an error but a result: its `FAIL` line says why, and its screenshot comes with it, which a client showing an error's text alone would leave out.
 
 Examples show a tool's arguments as JSON, under the tool's name, and the reply text below them. `$TMPDIR` in a reply stands for the system's temp directory.
 

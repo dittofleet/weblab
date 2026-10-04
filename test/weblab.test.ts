@@ -29,7 +29,15 @@ function test(name: string, ...rest: unknown[]) {
   nodeTest(name, { timeout: 90_000, ...(rest[0] as object) }, body);
 }
 
-type Reply = { text: string; images: number; isError: boolean; /** Each block of the reply in order: its text, or "image". */ blocks: string[] };
+type Reply = {
+  text: string;
+  images: number;
+  isError: boolean;
+  /** An error, or a step of the reply's own that failed: a failed step is a result, not an error. */
+  failed: boolean;
+  /** Each block of the reply in order: its text, or "image". */
+  blocks: string[];
+};
 type Weblab = {
   child: ChildProcess;
   rpc(method: string, params?: Record<string, unknown>, meta?: boolean): Promise<any>;
@@ -72,10 +80,12 @@ function weblab(env: Record<string, string> = {}): Weblab {
       if (error !== undefined) throw new Error(`${name}: ${JSON.stringify(error)}\n${stderr}`);
       assert.equal(result.resultType, "complete");
       const content = result.content as { type: string; text?: string }[];
+      const text = content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
       return {
-        text: content.filter((block) => block.type === "text").map((block) => block.text).join("\n"),
+        text,
         images: content.filter((block) => block.type === "image").length,
         isError: result.isError === true,
+        failed: result.isError === true || /^FAIL /m.test(text),
         blocks: content.map((block) => (block.type === "text" ? (block.text as string) : "image")),
       };
     },
@@ -168,7 +178,7 @@ test("new starts the project's server, run drives the page and shows it, end sto
   const lab = weblab();
   const dir = out();
   const opened = await lab.tool("new", { ...BASE, out: dir });
-  assert.equal(opened.isError, false, opened.text);
+  assert.equal(opened.failed, false, opened.text);
   assert.match(opened.text, /^session main {2}at http:\/\/localhost:\d+ \(server started by weblab: bun run dev\)/);
   assert.match(opened.text, /ok {4}1 goto/);
   assert.match(opened.text, /title fixture/);
@@ -179,7 +189,7 @@ test("new starts the project's server, run drives the page and shows it, end sto
   assert.ok(!opened.text.includes("do-not-print"));
 
   const ran = await lab.tool("run", { steps: [{ click: "#inc" }, { js: "document.querySelector('#inc').textContent" }, { look: { selector: "h1" } }, { shot: "home" }] });
-  assert.equal(ran.isError, false, ran.text);
+  assert.equal(ran.failed, false, ran.text);
   assert.match(ran.text, /ok {4}2 js \(\d+ms\)\n"count 1"/);
   assert.match(ran.text, /- heading "Fixture app" \[level=1\] \[ref=e\d+\]/);
   assert.equal(ran.images, 1, "the screenshot comes back as an image");
@@ -201,7 +211,7 @@ test("new starts the project's server, run drives the page and shows it, end sto
 
   // One step alone, and a ref from the look before it.
   const ref = /heading "Fixture app" \[level=1\] \[ref=(e\d+)\]/.exec(ran.text)?.[1];
-  assert.equal((await lab.tool("run", { steps: { expect: { ref, text: "Fixture app" } } })).isError, false);
+  assert.equal((await lab.tool("run", { steps: { expect: { ref, text: "Fixture app" } } })).failed, false);
   const moved = await lab.tool("run", { steps: [{ goto: "/other" }] });
   assert.match(moved.text, /url {3}http:\/\/localhost:\d+\/other\ntitle other/);
   const stale = await lab.tool("run", { steps: [{ click: ref }] });
@@ -220,9 +230,9 @@ test("new starts the project's server, run drives the page and shows it, end sto
 test("every kind of step and target works from a file, and a saved sign-in carries to a later session", async () => {
   const lab = weblab();
   const dir = out();
-  assert.equal((await lab.tool("new", { ...BASE, out: dir })).isError, false);
+  assert.equal((await lab.tool("new", { ...BASE, out: dir })).failed, false);
   const everything = await lab.tool("run", { file: steps("everything") });
-  assert.equal(everything.isError, false, everything.text);
+  assert.equal(everything.failed, false, everything.text);
   assert.equal(readFileSync(join(dir, "downloads", "note.txt"), "utf8"), "saved file");
   assert.match(readFileSync(join(dir, "looks", "main-page.yml"), "utf8"), /heading "Fixture app"/);
   // The mocked answer is marked as mocked; the real one isn't.
@@ -233,8 +243,8 @@ test("every kind of step and target works from a file, and a saved sign-in carri
 
   // The state the file saved signs a second session in, and its trace is kept when it ends.
   const signedIn = await lab.tool("new", { ...BASE, name: "ada", state: "ada", trace: true, out: dir });
-  assert.equal(signedIn.isError, false, signedIn.text);
-  assert.equal((await lab.tool("run", { session: "ada", file: join(kit, "other", "signed-in.json") })).isError, false);
+  assert.equal(signedIn.failed, false, signedIn.text);
+  assert.equal((await lab.tool("run", { session: "ada", file: join(kit, "other", "signed-in.json") })).failed, false);
   assert.match((await lab.tool("end", { session: "ada" })).text, /trace .*traces\/ada\.zip/);
   assert.ok(existsSync(join(dir, "traces", "ada.zip")));
 
@@ -243,9 +253,9 @@ test("every kind of step and target works from a file, and a saved sign-in carri
   assert.match(nobody.text, /no saved state named "nobody"/);
 
   // A file with steps that include another, an upload beside it, and a context option.
-  assert.equal((await lab.tool("new", { ...BASE, name: "dark", context: { colorScheme: "dark" }, out: dir })).isError, false);
+  assert.equal((await lab.tool("new", { ...BASE, name: "dark", context: { colorScheme: "dark" }, out: dir })).failed, false);
   const pass = await lab.tool("run", { session: "dark", file: steps("pass") });
-  assert.equal(pass.isError, false, pass.text);
+  assert.equal(pass.failed, false, pass.text);
   assert.match(pass.text, /ok {4}\d+ fill \(greet\.json step 1\)/);
   assert.equal(pass.images, 2);
   await lab.close();
@@ -258,6 +268,7 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   const failed = await lab.tool("run", { steps: [{ click: "#inc" }, { expect: "not there", timeout: 300, message: "the greeting is missing" }, { click: "#inc" }] });
   // A failure is a result, not an error: clients that show an error's text alone would drop its picture.
   assert.equal(failed.isError, false);
+  assert.equal(failed.failed, true);
   assert.match(failed.text, /ok {4}1 click/);
   assert.match(failed.text, /FAIL {2}2 expect: the greeting is missing \(expected the text "not there" to be visible\)/);
   assert.doesNotMatch(failed.text, /3 click/);
@@ -276,11 +287,16 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   const typo = await lab.tool("run", { steps: [{ clik: "#inc" }] });
   assert.match(typo.text, /unknown step "clik" \(did you mean "click"\?\)/);
   assert.match((await lab.tool("run", { steps: [{ click: "#inc", fill: "x" }] })).text, /expected exactly one action, found 2 \(click, fill\)/);
-  assert.match((await lab.tool("run", { steps: [{ click: { selector: "#inc", buton: "right" } }] })).text, /FAIL {2}1 click: no option "buton" \(did you mean "button"\?\)/);
+  // A step that never ran, being written wrong, makes the reply an error, unlike one that ran and failed.
+  const misspelt = await lab.tool("run", { steps: [{ click: { selector: "#inc", buton: "right" } }] });
+  assert.match(misspelt.text, /FAIL {2}1 click: no option "buton" \(did you mean "button"\?\)/);
+  assert.equal(misspelt.isError, true);
   assert.match((await lab.tool("run", { steps: [{ viewport: "500x400@2" }] })).text, /viewport: expected a size alone/);
   assert.match((await lab.tool("run", { steps: [{ js: "1" }], timeout: 0 })).text, /run: timeout is a number of milliseconds, not 0/);
   assert.match((await lab.tool("run", { steps: [{ click: "#inc", on: "nobody" }] })).text, /no session "nobody" is open; open: main/);
-  assert.match((await lab.tool("run", { session: "mian", steps: [{ click: "#inc" }] })).text, /no session "mian" is open \(did you mean "main"\?\)/);
+  const unopened = await lab.tool("run", { session: "mian", steps: [{ click: "#inc" }] });
+  assert.match(unopened.text, /no session "mian" is open \(did you mean "main"\?\)/);
+  assert.equal(unopened.isError, true);
   assert.match((await lab.tool("run", {})).text, /nothing to run on "main": give steps or file/);
   assert.match((await lab.tool("run", { file: "nowhere.json" })).text, /no such file/);
   assert.match((await lab.tool("new", { ...BASE, name: "main" })).text, /a session named "main" is already open/);
@@ -304,7 +320,7 @@ test("two sessions are two users: a step opens the second, and steps say which t
       { expect: { selector: "#signed", text: "signed in as ada" } },
     ],
   });
-  assert.equal(ran.isError, false, ran.text);
+  assert.equal(ran.failed, false, ran.text);
   assert.match(ran.text, /ok {4}4 expect on guest/);
   assert.ok(existsSync(join(dir, "shots", "guest-guest-home.png")));
   // It took after the session the step was on: the same address, the same size.
@@ -314,12 +330,12 @@ test("two sessions are two users: a step opens the second, and steps say which t
   // A name is one session's at a time, and free again once it has ended.
   assert.match((await lab.tool("run", { steps: [{ new: "guest" }] })).text, /a session named "guest" is already open/);
   const ended = await lab.tool("run", { steps: [{ end: "guest" }, { new: "guest" }, { js: "document.title", on: "guest" }] });
-  assert.equal(ended.isError, false, ended.text);
+  assert.equal(ended.failed, false, ended.text);
   assert.match(ended.text, /ended guest\nleft the server at .* running: another session is using it/);
 
   // Code opens one too, and holds it.
   const code = await lab.tool("run", { file: join(kit, "code", "two-sessions.ts") });
-  assert.equal(code.isError, false, code.text);
+  assert.equal(code.failed, false, code.text);
   assert.match(code.text, /"first": "fixture",\s+"second": "other",\s+"cookie": "",\s+"width": 500/);
   assert.doesNotMatch((await lab.tool("list")).text, /^second /m);
 
@@ -334,7 +350,7 @@ test("one worktree runs copies of its app side by side, each at its own address"
   const lab = weblab();
   const [first, second] = [await freePort(), await freePort()];
   const a = await lab.tool("new", { ...BASE, name: "a", address: first, start: "node server.mjs" });
-  assert.equal(a.isError, false, a.text);
+  assert.equal(a.failed, false, a.text);
   assert.match(a.text, new RegExp(`^session a {2}at http://localhost:${first} \\(server started by weblab: node server\\.mjs\\)`));
   const b = await lab.tool("new", { ...BASE, name: "b", address: `localhost:${second}`, start: "node server.mjs" });
   assert.match(b.text, new RegExp(`^session b {2}at http://localhost:${second} `));
@@ -362,7 +378,7 @@ test("a server someone else started is used as it is, and left running", async (
     for (const deadline = Date.now() + 10_000; !(await answers(origin)) && Date.now() < deadline; ) await sleep(100);
     const lab = weblab();
     const opened = await lab.tool("new", { ...BASE, address: port });
-    assert.equal(opened.isError, false, opened.text);
+    assert.equal(opened.failed, false, opened.text);
     assert.match(opened.text, new RegExp(`^session main {2}at ${origin}\\n`));
     assert.match((await lab.tool("end")).text, new RegExp(`left the server at ${origin} running, as weblab didn't start it`));
     await lab.close();
@@ -414,7 +430,7 @@ test("sessions opened at the same moment share one server, and leaving mid-open 
   // With no address, and by the address its .env names: one server either way.
   rmSync(join(app, ".env"), { force: true });
   const [a, b, c] = await Promise.all([lab.tool("new", { ...BASE, name: "a" }), lab.tool("new", { ...BASE, name: "b" }), lab.tool("new", { ...BASE, name: "c", path: "/other" })]);
-  for (const opened of [a, b, c]) assert.equal(opened.isError, false, opened.text);
+  for (const opened of [a, b, c]) assert.equal(opened.failed, false, opened.text);
   const origin = originIn(a.text);
   assert.equal(originIn(b.text), origin);
   assert.equal([a, b, c].filter((opened) => /started the server/.test(opened.text)).length, 1);
@@ -462,13 +478,13 @@ test("params fill steps and files, code hands back values, and a shot is held to
   const dir = out();
   await lab.tool("new", { ...BASE, out: dir });
   const filled = await lab.tool("run", { steps: [{ js: "['${who=nobody}', ${count}]" }, { include: join(kit, "files", "greet.json") }], params: { count: 3, who: "ada" } });
-  assert.equal(filled.isError, false, filled.text);
+  assert.equal(filled.failed, false, filled.text);
   assert.match(filled.text, /"ada",\s+3/);
   const unfilled = await lab.tool("run", { steps: [{ include: join(kit, "files", "greet.json") }] });
   assert.match(unfilled.text, /greet\.json: needs "who", which neither the include nor params gave/);
 
   const values = await lab.tool("run", { file: join(kit, "code", "values.ts") });
-  assert.equal(values.isError, false, values.text);
+  assert.equal(values.failed, false, values.text);
   // The steps the code ran are shown under it with what they handed back, and what the code handed back after them.
   assert.match(values.text, /ok {4}1 playwright \(\d+ms\)\n {2}ok {4}1\.1 goto \(\d+ms\)\n {2}ok {4}1\.2 js \(\d+ms\)\n {2}"fixture"\n\{\s+"title": "fixture"\s+\}/);
   const thrown = await lab.tool("run", { file: join(kit, "code", "throws.ts") });
@@ -490,11 +506,11 @@ test("params fill steps and files, code hands back values, and a shot is held to
   // The same page again matches its earlier shot; a page that has changed doesn't, and what differs is kept.
   await lab.tool("run", { steps: [{ goto: "/" }, { shot: "now" }] });
   const before = join(dir, "shots", "main-now.png");
-  assert.equal((await lab.tool("run", { steps: [{ goto: "/" }, { shot: { as: "again", matches: before } }] })).isError, false);
+  assert.equal((await lab.tool("run", { steps: [{ goto: "/" }, { shot: { as: "again", matches: before } }] })).failed, false);
   const changed = await lab.tool("run", { steps: [{ click: "#inc" }, { shot: { as: "again", matches: before } }] });
   assert.match(changed.text, /the shot differs from .*main-now\.png in \d+ of 480000 pixels/);
   assert.ok(existsSync(join(dir, "shots", "main-again.diff.png")));
-  assert.equal((await lab.tool("run", { steps: [{ shot: { as: "lenient", matches: before, tolerance: 0.5 } }] })).isError, false);
+  assert.equal((await lab.tool("run", { steps: [{ shot: { as: "lenient", matches: before, tolerance: 0.5 } }] })).failed, false);
   await lab.close();
 });
 
@@ -515,7 +531,7 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   await lab.tool("new", { ...BASE, name: "plain", out: dir });
   await lab.tool("run", { session: "plain", steps: [{ goto: "/other" }, { hover: "h1" }, { shot: "other" }] });
   const same = await lab.tool("run", { steps: [{ goto: "/other" }, { hover: "h1" }, { js: "getComputedStyle(document.querySelector('[data-weblab-cursor]')).visibility" }, { shot: { as: "other", matches: join(dir, "shots", "plain-other.png") } }] });
-  assert.equal(same.isError, false, same.text);
+  assert.equal(same.failed, false, same.text);
   assert.match(same.text, /"visible"/);
   // Stopped, the video is written, and the page is left without the cursor, in its frames too.
   const cursors = "[document, document.querySelector('#frame').contentDocument].map((doc) => doc.querySelector('[data-weblab-cursor]') !== null)";
@@ -548,12 +564,12 @@ test("two running apps are two sessions, joined by their ports and left as they 
   try {
     const lab = weblab();
     const first = await lab.tool("new", { name: "a", attach: a.port });
-    assert.equal(first.isError, false, first.text);
+    assert.equal(first.failed, false, first.text);
     assert.match(first.text, new RegExp(`^session a {2}attached to ${a.port}\\n`));
     // It stays where it was: nothing is navigated, and no server is started.
     assert.doesNotMatch(first.text, /goto|started the server/);
     assert.match(first.text, /title Device A/);
-    assert.equal((await lab.tool("new", { name: "b", attach: `localhost:${b.port}`, tab: "Device B" })).isError, false);
+    assert.equal((await lab.tool("new", { name: "b", attach: `localhost:${b.port}`, tab: "Device B" })).failed, false);
     // A second session on the very same tab is allowed, and said.
     const again = await lab.tool("new", { name: "a2", attach: a.port });
     assert.match(again.text, new RegExp(`note: "a" is driving this same tab of ${a.port}; steps on any of them act on the one tab\\. Give tab or newTab to drive another\\.`));
@@ -593,9 +609,9 @@ test("the same steps run in WebKit and Firefox, each as a session beside the oth
   await lab.tool("new", { ...BASE });
   for (const [browser, engine] of [["webkit", "AppleWebKit"], ["firefox", "Firefox"]] as const) {
     const opened = await lab.tool("new", { ...BASE, name: browser, browser });
-    assert.equal(opened.isError, false, opened.text);
+    assert.equal(opened.failed, false, opened.text);
     const ran = await lab.tool("run", { session: browser, steps: [{ click: "#inc" }, { expect: { selector: "#inc", text: "count 1" } }, { js: "navigator.userAgent" }] });
-    assert.equal(ran.isError, false, ran.text);
+    assert.equal(ran.failed, false, ran.text);
     assert.match(ran.text, new RegExp(engine));
     assert.match((await lab.tool("run", { session: browser, steps: [{ cdp: "Browser.getVersion" }] })).text, new RegExp(`cdp is the Chrome DevTools Protocol, which ${browser} doesn't speak`));
   }
@@ -606,7 +622,7 @@ test("the same steps run in WebKit and Firefox, each as a session beside the oth
 test("a server that puts itself in the background is still stopped, and an address it only mentions is not taken for it", async () => {
   const detached = weblab({ WEBLAB_TEST_DETACH: "1" });
   const opened = await detached.tool("new", { ...BASE });
-  assert.equal(opened.isError, false, opened.text);
+  assert.equal(opened.failed, false, opened.text);
   assert.match(opened.text, /the server went into the background \(pid \d+\); weblab is keeping track of it/);
   const origin = originIn(opened.text);
   await detached.close();
@@ -620,7 +636,7 @@ test("a server that puts itself in the background is still stopped, and an addre
     rmSync(join(app, ".env"), { force: true });
     const lab = weblab({ WEBLAB_TEST_MENTION: `http://localhost:${port}`, WEBLAB_TEST_DELAY: "600" });
     const mine = await lab.tool("new", { ...BASE });
-    assert.equal(mine.isError, false, mine.text);
+    assert.equal(mine.failed, false, mine.text);
     assert.notEqual(originIn(mine.text), `http://localhost:${port}`);
     await lab.close();
     assert.equal(await answers(`http://localhost:${port}`), true);
