@@ -524,11 +524,11 @@ Start the app with a debugging port, then attach:
 
 An app just started may still be loading, a fresh dev build especially. `{ "ready": true }` waits for it to show something, and `{ "video": "start" }` waits the same way before it records.
 
-An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. Started with `--inspect=9229` too and opened with `"inspect": 9229`, the session runs code in the app's main process: `{ "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: true }))" }` answers native file dialogs until the session ends. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
+An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. If the app is also started with `--inspect=9229` and the session opened with `"inspect": 9229`, steps can run code in its main process. `{ "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: true }))" }` answers its native file dialogs until the session ends. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
 
 ## Get past an Electron app's native dialogs, offline
 
-A native file picker or message box can't be clicked from a step, and a flow that downloads something needs the network. From the app's main process, both can be answered. Here weblab starts the app with both ports, and stops it at the end:
+No step can click a native file picker or message box, and a flow that downloads something needs the network. Both can be handled from the app's main process. Here weblab starts the app with both ports, and stops it when the session ends:
 
 `new`
 
@@ -553,7 +553,7 @@ A native file picker or message box can't be clicked from a step, and a flow tha
 }
 ```
 
-The stubs are put back when the session ends, and `noErrors` counts the main process's errors too. [Code](code.md#electron-the-apps-main-process) has what else the main process can do.
+The stubs are put back when the session ends. `noErrors` covers errors from the main process too. [Code](code.md#electron-the-apps-main-process) has more on what the main process can do.
 
 ## Test two users or two devices at once
 

@@ -8,7 +8,7 @@ This page covers the five steps that run code, and step files written as code. T
 | `css` | A stylesheet added to the page | Hiding toasts, dev toolbars and whatever changes from run to run, before a screenshot |
 | `playwright` | [Playwright](https://playwright.dev/docs/api/class-page) code driving the page from outside | Anything the named steps don't do: precise mouse paths, the clock, downloads, popups, permissions, PDFs |
 | `cdp` | One raw [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) command | What even Playwright doesn't offer: network and CPU throttling, performance metrics, vision deficiencies |
-| `electron` | JavaScript in an attached Electron app's main process | What the app's windows can't reach: native dialogs, menus, windows themselves, IPC handlers |
+| `electron` | JavaScript in an attached Electron app's main process | What the app's pages can't reach: native dialogs, menus, the windows themselves, IPC |
 
 `js`, `playwright`, `cdp` and `electron` hand back what they return. The reply prints it as JSON under the step, and in code, `await step(...)` returns it.
 
@@ -116,7 +116,7 @@ The [protocol reference](https://chromedevtools.github.io/devtools-protocol/) li
 
 ## electron: the app's main process
 
-An Electron app runs its windows' pages in Chromium, and everything else in its main process: the windows themselves, menus, native dialogs, IPC, the file system. `electron` runs JavaScript there. It needs a session [attached](sessions.md#running-browsers-and-electron-apps) to the app with `inspect` as well: the port the app's `--inspect` flag gives its Node debugger.
+An Electron app runs each window's page in Chromium, and everything else in its main process: the windows themselves, menus, native dialogs, IPC and the file system. `electron` runs JavaScript in the main process. The session has to be [attached](sessions.md#running-browsers-and-electron-apps) to the app and opened with `inspect`, the port of the Node debugger the app starts with `--inspect`.
 
 ```sh
 /Applications/MyApp.app/Contents/MacOS/MyApp --remote-debugging-port=9222 --inspect=9229
@@ -128,7 +128,9 @@ An Electron app runs its windows' pages in Chromium, and everything else in its 
 { "name": "app", "attach": 9222, "inspect": 9229 }
 ```
 
-The code is statements, and the value of the last one is handed back, with no `return`, and awaited when it is a promise. `await` works anywhere in it. `electron` is the electron module, and `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen` are its parts by name. `require` works too, and so does [`stub`](#stubs). What the code declares with `const`, `let` and `class` stays in it, and may reuse those names. `var` and `function` declarations become the app's globals, as in any script. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
+The code can be several statements, and the step hands back the value of the last one, with no `return`. If that value is a promise, it is awaited, and `await` works anywhere in the code. The electron module is there as `electron`, and its common parts by name: `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen`. `require` and [`stub`](#stubs) work too. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
+
+Variables declared with `const`, `let` or `class` stay inside the step, so they never clash with the app's own. `var` and `function` declarations become globals of the app, as in any script.
 
 `run`
 
@@ -147,32 +149,34 @@ The code is statements, and the value of the last one is handed back, with no `r
 }
 ```
 
-Data comes back as it is, and anything that isn't data as what it is, however deep: `[BrowserWindow]`, `[Function save]`, `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, a date as its ISO string, a set as a list, and a map as an object when its keys are strings. Code that doesn't compile is refused, in the app's own words. An error it throws as it runs fails the step with its message.
+Values come back as JSON. What isn't plain data comes back as a short label instead: a window as `[BrowserWindow]`, a function as `[Function save]`, and a reference back to an object already shown as `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, dates as ISO strings, sets as lists, and maps as objects when their keys are strings.
 
-What the main process logs goes to the session's console log, and so to the reply, as `[main console.log] ...`, much as Node's console prints it, one level deep. It counts as the page's does: `ignore` applies to it, `{ "expect": { "console": ... } }` waits for it, and a `console.error` fails `noErrors`, which is where an IPC handler that throws shows. Every session joined to one app sees all of what its main process logs.
+Code with a syntax error is refused, with the app's own error message. Code that throws while it runs fails the step with the error.
 
-`{ "expect": { "electron": "code" } }` waits until code in the main process is truthy, as `{ "expect": { "js": ... } }` does in the page.
+What the main process logs goes to the session's console log and the reply, marked `[main console.log] ...` and printed roughly as Node would print it, one level deep. These lines count the same as the page's: `ignore` filters them, `{ "expect": { "console": ... } }` can wait for one, and a `console.error` fails `noErrors`. That is usually where an IPC handler that throws shows up. Every session joined to the same app sees everything its main process logs.
 
-In `playwright` code, `electron(fn, arg)` runs a function there instead. It is sent as its source, so it can't use variables from around it. Pass what it needs as `arg`, which goes as JSON.
+`{ "expect": { "electron": "code" } }` waits until the code is truthy in the main process, as `{ "expect": { "js": ... } }` does in the page.
 
-Some things worth knowing about Electron itself:
+In `playwright` code, `electron(fn, arg)` runs a function in the main process. The function is sent as source text, so it can't use variables from the code around it. Pass what it needs as `arg`, which is sent as JSON.
 
-- An IPC handler isn't a property, so `stub` can't stand in for it. Replacing one takes `ipcMain.removeHandler("channel")`, then `ipcMain.handle("channel", ...)`, and it stays replaced after the session. To call or restore the original, keep it first: Electron keeps handlers in `ipcMain._invokeHandlers`, a map that is its own and not promised to stay.
-- A menu item clicked from code (`Menu.getApplicationMenu().getMenuItemById("open").click()`) gets no window unless given one. An app that acts on the focused window wants `item.click({}, window, window.webContents)`.
-- Node's own debugger is open to the code too, for what the protocol has and Electron doesn't: `new (require("inspector").Session)()` can profile the main process or take a heap snapshot.
+A few things about Electron itself are worth knowing:
 
-What joining the main process means:
+- IPC handlers aren't properties, so `stub` can't replace them. Replacing one takes `ipcMain.removeHandler("channel")` and then `ipcMain.handle("channel", ...)`, and the new handler stays after the session ends. To call or restore the original, keep it first. Electron holds handlers in `ipcMain._invokeHandlers`, an internal map that may change in a future version.
+- A menu item clicked from code (`Menu.getApplicationMenu().getMenuItemById("open").click()`) gets no window unless one is passed. If the app acts on the focused window, use `item.click({}, window, window.webContents)`.
+- Node's own inspector is open to the code too, for what Electron doesn't offer: `new (require("inspector").Session)()` can profile the main process or take a heap snapshot.
 
-- **It changes the real app, and the machine.** What `stub` replaced is put back when the session ends. Anything else the code changes stays until the app restarts. `clipboard.writeText` writes the system's clipboard, and `shell.openExternal` opens a real browser.
-- **The app waits while the code runs.** Its windows can't respond until the main process is free again. Code that is still busy at the step's timeout is stopped, before an `await` or after one, and the app goes on. Code that is only waiting, on a promise that hasn't settled, is no longer waited for, but may still settle in the app.
-- **The debugger port is open to anything on the machine** for as long as the app runs, and anything that reaches it can run code as the app. Turn it on only while testing, on a port you choose. weblab never turns it on itself.
-- **Not every app can be joined.** An app packaged with its `EnableNodeCliInspectArguments` [fuse](https://www.electronjs.org/docs/latest/tutorial/fuses) turned off ignores `--inspect`. Its windows can still be attached, and a dev build has it on.
-- **Quitting and restarting aren't held up.** An app that exits while a session is joined to it lets go of the session, so a dev tool's restart goes ahead. The next step on that session says the app went away. End it, and open a new one on the app that came back.
-- **Both ports have to be the same app's.** An app's windows and its main process are one process, so `new` refuses an `attach` and an `inspect` that belong to two.
+Before using it:
+
+- **It changes the real app, and the machine.** Stubs are put back when the session ends, but anything else the code changes stays until the app restarts. `clipboard.writeText` writes the system clipboard, and `shell.openExternal` opens a real browser.
+- **The app freezes while the code runs.** Its windows can't respond until the main process is free. Code that is still busy when the step times out is stopped, whether or not it awaited something first, and the app carries on. Code that is only waiting on a promise isn't stopped. The step stops waiting for it, but the promise may still settle later in the app.
+- **The debugger port is open to anything on the machine** while the app runs, and anything that connects to it can run code as the app. Turn it on only while testing, on a port of your own choosing. weblab never turns it on itself.
+- **Not every app can be joined.** An app packaged with the `EnableNodeCliInspectArguments` [fuse](https://www.electronjs.org/docs/latest/tutorial/fuses) turned off ignores `--inspect`. Its windows can still be attached. Dev builds normally have the fuse on.
+- **Quitting and restarting aren't blocked.** If the app exits while a session is joined to it, weblab lets go at once, so a dev tool's restart goes through. The next step on that session says the app went away. End the session and open a new one on the restarted app.
+- **Both ports must belong to the same app.** An app's main process is also the browser process behind its windows, so `new` refuses an `attach` and an `inspect` that point at two different apps.
 
 ### Stubs
 
-`stub(object, name, replacement)` puts the replacement in place of `object[name]` for the rest of the session, and puts the original back when the session ends, so an app that was attached is left as it was found. It is how a native dialog, a link that would open a browser, or a request that would leave the machine is answered:
+`stub(object, name, replacement)` replaces `object[name]` for the rest of the session. When the session ends, the original is put back, so an attached app is left the way it was found. It is how a test answers a native dialog, catches a link that would open a browser, or serves a request that would otherwise leave the machine:
 
 `run`
 
@@ -189,7 +193,9 @@ What joining the main process means:
 }
 ```
 
-Electron's dialog calls take the window first only when the app gives one, so a replacement that reads the options takes them last, as `args.at(-1)`. A replacement that wants the original keeps it first, as the `fetch` one does. Logging from it is how a check sees that it was called. A property that can't be replaced (read-only, or a getter, as the electron module's own parts are: stub `dialog.showOpenDialog`, not `electron.dialog`) is refused. When the session ends, the property is as it was, even one that came from a prototype. One that something else has replaced in the meantime is left as that has it.
+Electron's dialog functions take a window as their first argument only when the app passes one, so a replacement that needs the options reads the last argument, `args.at(-1)`. A replacement that calls the original saves it first, as the `fetch` one does. Logging from a replacement is how a check can tell it was called.
+
+`stub` refuses a property it can't replace, such as a read-only one or a getter. The electron module's own parts are getters, so stub `dialog.showOpenDialog`, not `electron.dialog`. When the session ends, each property goes back to exactly how it was, even one inherited from a prototype. A property something else has replaced in the meantime is left alone.
 
 ## Code files
 

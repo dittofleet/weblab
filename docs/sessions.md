@@ -153,9 +153,9 @@ Choose a free port yourself, and attach only to a browser or app you started.
 
 An Electron app that doesn't take the switch can turn it on itself with `app.commandLine.appendSwitch("remote-debugging-port", port)` before the app is ready.
 
-An app started by its dev tooling gets the flags through it. With Electron Forge, what comes after `--` reaches the app: `electron-forge start -- --remote-debugging-port=9222 --inspect=9229`. Forge's own `--inspect-electron` always uses port 9229. A launch script of the app's own may need to pass them on.
+An app started through its dev tooling needs the flags passed along. With Electron Forge, everything after `--` goes to the app: `electron-forge start -- --remote-debugging-port=9222 --inspect=9229`. Forge's own `--inspect-electron` flag always uses port 9229. An app's own launch script may need changing to pass the flags on.
 
-weblab can start the app itself, and stop it when the session ends: give the debugging port as `address` as well, and the command as `start`, which gets the port in `PORT`:
+weblab can also start the app itself, and stop it when the session ends. Give the debugging port as `address` too, and the command as `start`. The command gets the port in `PORT`:
 
 `new`
 
@@ -163,7 +163,7 @@ weblab can start the app itself, and stop it when the session ends: give the deb
 { "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
 ```
 
-An app started by hand that exits at once with `Cannot find module 'electron'` was run as plain Node: the shell has `ELECTRON_RUN_AS_NODE` set, as one opened from another Electron app (an editor, say) can. Start it with `env -u ELECTRON_RUN_AS_NODE` in front. A command weblab starts never gets it.
+If an app started by hand exits at once with `Cannot find module 'electron'`, it ran as plain Node. The shell has `ELECTRON_RUN_AS_NODE` set, which happens in a terminal opened from another Electron app, such as an editor. Put `env -u ELECTRON_RUN_AS_NODE` in front of the command. Commands weblab starts never get the variable.
 
 ### Driving it
 
@@ -213,7 +213,7 @@ Two windows of a desktop app, or two apps that talk to each other, are two sessi
 
 ### The main process
 
-An Electron app's main process owns its windows, menus, native dialogs and IPC, which no step in a window can reach. Started with `--inspect` as well, the app opens a Node debugger on a port of its own, and `inspect` joins it beside the window:
+An Electron app's main process owns its windows, menus, native dialogs and IPC, none of which a step in a window can reach. An app started with `--inspect` as well opens a Node debugger on a second port, and `inspect` joins it alongside the window:
 
 ```sh
 /Applications/MyApp.app/Contents/MacOS/MyApp --remote-debugging-port=9222 --inspect=9229
@@ -229,7 +229,7 @@ An Electron app's main process owns its windows, menus, native dialogs and IPC, 
 session app  attached to 9222, main process at 9229
 ```
 
-Then [`electron`](code.md#electron-the-apps-main-process) steps run code there, and what the main process logs shows in the reply beside what the window logs:
+[`electron`](code.md#electron-the-apps-main-process) steps then run code there, and what the main process logs shows up in replies next to what the window logs:
 
 `run`
 
@@ -237,7 +237,7 @@ Then [`electron`](code.md#electron-the-apps-main-process) steps run code there, 
 { "session": "app", "steps": [{ "electron": "stub(dialog, 'showMessageBox', async () => ({ response: 1 }))" }, { "click": "text=Delete" }, { "expect": "Kept" }] }
 ```
 
-What `stub` replaces is put back when the session ends. Anything else the code changes stays changed until the app restarts. The port stays open as long as the app runs, to anything on the machine. When the app quits or restarts, the session says so on its next step. End it and open it again. [Code](code.md#electron-the-apps-main-process) has the rest.
+Stubs are put back when the session ends, but anything else the code changes stays until the app restarts. The debugger port stays open to anything on the machine for as long as the app runs. If the app quits or restarts, the next step says so, and the session has to be ended and opened again. [Code](code.md#electron-the-apps-main-process) covers the rest.
 
 ## Other browsers and engines
 

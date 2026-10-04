@@ -21,7 +21,7 @@ Opens a session: a browser of its own (its own cookies, storage and tabs) pointi
 | `attach` | Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. See [attach](#attach). | Launch a browser |
 | `tab` | With `attach`: which tab to drive, by part of its URL or title. | The first tab |
 | `newTab` | With `attach`: open a new tab to drive, and leave the browser's own tabs alone. | `false` |
-| `inspect` | With `attach` to an Electron app: its main process's Node debugger, by the port or address its `--inspect` flag gave it, for [`electron`](code.md#electron-the-apps-main-process) steps. | none |
+| `inspect` | With `attach` to an Electron app: the port or address of its main process's Node debugger, from `--inspect`. Needed for [`electron`](code.md#electron-the-apps-main-process) steps. | none |
 | `browser` | The browser to launch: `chrome`, `chrome-beta`, `chrome-dev`, `chrome-canary`, `edge`, `edge-beta`, `edge-dev`, `chromium`, `brave`, `helium`, `vivaldi`, `arc`, `opera`, the name of any app in `/Applications` or `~/Applications`, or the path to a binary or `.app`. `webkit` (or `safari`) and `firefox` are Playwright's own builds of those engines. | `chrome` |
 | `browserArgs` | Extra command-line flags for the browser it launches. | none |
 | `headed` | Give the browser a window on the screen. | `false` (headless) |
@@ -89,10 +89,10 @@ The project is the nearest directory at or above `dir` with a `package.json`, lo
 - It stays where it is: with no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one is given, else against the page's current origin, an Electron app's own scheme (`myapp://`) included.
 - No server is started unless `address` or `start` is given.
 - `viewport` resizes the tab only when given.
-- When the app quits or restarts, the next step on the session says it went away. End it and open it again.
+- If the browser or app quits or restarts, the next step on the session says it went away. The session then has to be ended and opened again.
 - When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups) and lets go of the browser, which keeps running.
 - A `video` step records the tab being driven, once it is ready: an app still loading isn't filmed blank.
-- With `inspect`, the session joins an Electron app's main process too, and the reply to `new` says `main process at 9229`. It is checked at once: a port that is Chromium's, a Node process that isn't Electron's, or the main process of another app than the one attached, is refused.
+- With `inspect`, the session joins the Electron app's main process as well, and the reply to `new` says `main process at 9229`. The port is checked right away. It is refused if it is a Chromium debugging port, a Node process other than an Electron app, or the main process of a different app from the one attached.
 
 [Sessions](sessions.md#running-browsers-and-electron-apps) has more, including how to start a browser or app with a port.
 

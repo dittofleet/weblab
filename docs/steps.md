@@ -2,7 +2,7 @@
 
 This is the reference for every step `run` takes: what each does, its forms and options, how steps name elements, and how steps are reused with `include` and placeholders. The `run` tool's own description lists the same steps in one line each.
 
-Most steps are shortcuts for what is done all the time. Five run code (`js`, `css`, `playwright`, `cdp`, and `electron` in an Electron app's main process), and with those anything a browser can do is in reach; see [Code](code.md).
+Most steps are shortcuts for what is done all the time. Five of them run code (`js`, `css`, `playwright`, `cdp`, and `electron` in an Electron app's main process), and with those anything a browser can do is in reach. [Code](code.md) covers them.
 
 | Group | Steps |
 | --- | --- |
