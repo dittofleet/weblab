@@ -533,7 +533,7 @@ A native file picker or message box can't be clicked from a step, and a flow tha
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "pnpm electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
 ```
 
 `run`

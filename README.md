@@ -99,7 +99,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 | [Tools](docs/tools.md) | Every argument of `new`, `run`, `end`, `list` and `docs`, what each reply holds, servers, attaching, long runs, and where files go. |
 | [Steps](docs/steps.md) | Every step and its options, targeting elements, refs, `expect`, `include` and placeholders. |
 | [Sessions](docs/sessions.md) | More than one session: two users, copies of an app, running browsers and Electron apps, other engines, saved sign-ins. |
-| [Code](docs/code.md) | `js`, `css`, `playwright` and `cdp`, and step files written as code. |
+| [Code](docs/code.md) | `js`, `css`, `playwright`, `cdp` and `electron`, and step files written as code. |
 | [Recipes](docs/recipes.md) | Short answers to common tasks, as the steps to run. |
 
 ## Development

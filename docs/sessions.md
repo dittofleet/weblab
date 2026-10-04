@@ -160,7 +160,7 @@ weblab can start the app itself, and stop it when the session ends: give the deb
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "pnpm electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
 ```
 
 An app started by hand that exits at once with `Cannot find module 'electron'` was run as plain Node: the shell has `ELECTRON_RUN_AS_NODE` set, as one opened from another Electron app (an editor, say) can. Start it with `env -u ELECTRON_RUN_AS_NODE` in front. A command weblab starts never gets it.

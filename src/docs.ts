@@ -15,7 +15,7 @@ export const DOCS: DocPage[] = [
   { name: "tools", about: "Every argument of new, run, end, list and docs, what each reply holds, how an address is resolved, when a server is started and stopped, attach, long runs, and where files go.", text: tools },
   { name: "steps", about: "Every step and its options, how elements are targeted, refs, expect, include and placeholders.", text: steps },
   { name: "sessions", about: "More than one session: two users, copies of an app on several ports, running browsers and Electron apps, other engines, saved sign-ins.", text: sessions },
-  { name: "code", about: "The js, css, playwright and cdp steps, and step files written as code.", text: code },
+  { name: "code", about: "The js, css, playwright, cdp and electron steps, and step files written as code.", text: code },
   { name: "recipes", about: "Short answers to common tasks, as the steps to run: fake an API, steady screenshots, native menus, record a demo, debug a failure.", text: recipes },
 ];
 

@@ -51,7 +51,7 @@ console since the last reply:
   [console.log] app mounted (http://localhost:5173/src/main.tsx)
 ```
 
-- The first line names the session and its address. `(server started by weblab: ...)` is there when the server is one weblab started, in this process or another. An attached session says `attached to 9222`, and `, at <address>` when it was given one.
+- The first line names the session and its address. `(server started by weblab: ...)` is there when the server is one weblab started, in this process or another. An attached session says `attached to 9222`, then `, main process at 9229` when it was given `inspect`, and `, at <address>` when it was given one.
 - `files` is the directory the session writes to.
 - Lines about the server follow, when there is something to say: that weblab started it, is waiting for another weblab that is starting it, or is keeping track of one that went into the background.
 - The first `goto` is reported as step 1, as a `run` reports steps.
@@ -144,7 +144,7 @@ In order, a reply holds:
 5. `shot  <path>` for each screenshot, and `file  <path>` for other files the steps wrote (a named `look`, a video `stop` wrote).
 6. `url` and `title`, when they changed since the last reply about this session.
 7. The tabs, as `tab 0* <url>`, `tab 1  <url>` (the `*` marks the one steps act on), when there is more than one and they changed.
-8. `console since the last reply:` and what the page logged since then: console messages, page errors, failed requests, responses with an error status, and dialogs. At most the last 40 lines are shown, with the path of the full log when there were more. The same line repeated shows once with a count, `(x12)`.
+8. `console since the last reply:` and what the page logged since then: console messages, page errors, failed requests, responses with an error status, and dialogs. With `inspect`, what the app's main process logged is there too, as `[main console.log] ...`. At most the last 40 lines are shown, with the path of the full log when there were more. The same line repeated shows once with a count, `(x12)`.
 
 Each screenshot comes back as an image, placed right after the lines of the step that took it, so several in one reply are told apart. Up to six per reply are sent, leaving out any over 4 MB; their paths are in the text either way.
 

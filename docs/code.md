@@ -180,7 +180,7 @@ What joining the main process means:
 {
   "session": "app",
   "steps": [
-    { "electron": "stub(dialog, 'showMessageBox', async (window, options) => { console.log('asked:', options.message); return { response: 1 }; })" },
+    { "electron": "stub(dialog, 'showMessageBox', async (...args) => { console.log('asked:', args.at(-1).message); return { response: 1 }; })" },
     { "click": "text=Delete" },
     { "expect": { "console": "asked: Delete everything?" } },
     { "electron": "stub(shell, 'openExternal', async (url) => console.log('would open', url))" },
@@ -189,7 +189,7 @@ What joining the main process means:
 }
 ```
 
-A replacement that wants the original keeps it first, as the `fetch` one does. Logging from it is how a check sees that it was called. A property that can't be replaced (read-only, or a getter, as the electron module's own parts are: stub `dialog.showOpenDialog`, not `electron.dialog`) is refused. When the session ends, the property is as it was, even one that came from a prototype. One that something else has replaced in the meantime is left as that has it.
+Electron's dialog calls take the window first only when the app gives one, so a replacement that reads the options takes them last, as `args.at(-1)`. A replacement that wants the original keeps it first, as the `fetch` one does. Logging from it is how a check sees that it was called. A property that can't be replaced (read-only, or a getter, as the electron module's own parts are: stub `dialog.showOpenDialog`, not `electron.dialog`) is refused. When the session ends, the property is as it was, even one that came from a prototype. One that something else has replaced in the meantime is left as that has it.
 
 ## Code files
 
@@ -293,7 +293,7 @@ export default async ({ step, newSession }) => {
 };
 ```
 
-`newSession()` takes what the `new` tool takes, and what it doesn't say is as the session the code runs on, as for the [`new` step](sessions.md#a-new-step-and-what-it-inherits): `newSession({ name: "b", attach: 9242 })` is another running browser or Electron app. What it hands back has `name`, `page`, `context`, `origin`, `logs`, `responses`, `locate`, `cdp`, `step` and `end()`. A session opened in code stays open after the code ends, until something ends it.
+`newSession()` takes what the `new` tool takes, and what it doesn't say is as the session the code runs on, as for the [`new` step](sessions.md#a-new-step-and-what-it-inherits): `newSession({ name: "b", attach: 9242 })` is another running browser or Electron app. What it hands back has `name`, `page`, `context`, `origin`, `logs`, `responses`, `locate`, `cdp`, `electron`, `step` and `end()`. A session opened in code stays open after the code ends, until something ends it.
 
 ## One file, several setups
 
