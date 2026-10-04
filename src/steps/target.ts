@@ -81,7 +81,8 @@ export async function ariaTree(
 function byRef(ctx: ActionContext, ref: string): Locator {
   const refs = ctx.refs;
   if (refs !== undefined) {
-    // Refs from a tree of a page with frames carry its number: f2e12.
+    // A ref from any document but a tab's first (a frame, or the page
+    // after it loads again) carries that document's number: f2e12.
     const meant = refs?.names.has(ref) === false ? [...refs.names].find((name) => name.endsWith(ref) && REF.test(name)) : undefined;
     const problem =
       refs === null

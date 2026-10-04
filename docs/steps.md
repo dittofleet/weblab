@@ -95,7 +95,7 @@ A step's own options sit in the same object as the target, or the target goes wh
 
 ### Refs
 
-`look` prints the page's accessibility tree with a ref on each element (`[ref=e12]`; `f2e12` inside a frame). A ref is a target: `{ "click": "e12" }` acts on the element that line described. Refs belong to one session and to its latest `look`:
+`look` prints the page's accessibility tree with a ref on each element (`[ref=e12]`). A ref is prefixed with a document's number, as in `f2e12`, when the element is in a frame or the page has loaded again since the tab opened: Playwright numbers every document but a tab's first. Use a ref as printed, prefix and all. A ref is a target: `{ "click": "e12" }` acts on the element that line described. Refs belong to one session and to its latest `look`:
 
 | After this | Refs |
 | --- | --- |
@@ -130,7 +130,7 @@ Tabs belong to one session and share its cookies. A second user is a second sess
 | `hover` | target or point, plus `modifiers`, `position`, `force` | Moves the pointer over it, and leaves it there. |
 | `drag` | `{ from, to }`, each a target or point | Presses at `from`, moves to `to` in small steps, and releases, so sortable lists and canvases see a real drag. |
 | `scroll` | target, `{ by: { x, y } }` or `{ to: "top" \| "bottom" }` | A target alone is scrolled into view. `by` and `to` scroll the page, or, with a target beside them, that element: a sidebar, a list, a code block. |
-| `press` | `"Enter"` or `{ key, ...target }` | Presses a key or chord (`"?"`, `"Meta+k"`, `"Shift+Tab"`) on the page, or on one element. |
+| `press` | `"Enter"` or `{ key, hold, ...target }` | Presses a key or chord (`"?"`, `"Meta+k"`, `"Shift+Tab"`) on the page, or on one element. `hold` keeps it down that many milliseconds before letting go, for keys that act while held; it sends one keydown, not the repeats a held key sends by hand. |
 | `type` | `"text"` or `{ value, delay, ...target }` | Types key by key into whatever has focus, or into a target. `fill` sets a value at once; `type` is for fields that react to each key. `delay` is milliseconds between keys. |
 
 In a recorded session, a drawn cursor glides to each click, hover and drag, and each action is followed by a short pause, so the video can be followed. The cursor is hidden while a `shot` is taken, so it is never in a screenshot.

@@ -52,6 +52,23 @@
     }
   },
   {
+    "note": "a held key stays down until it is let go, however short the step's timeout",
+    "js": "addEventListener('keydown', (event) => { if (event.key === 'ArrowUp') window.down = performance.now(); }); addEventListener('keyup', (event) => { if (event.key === 'ArrowUp') window.held = performance.now() - window.down; })"
+  },
+  {
+    "press": {
+      "key": "ArrowUp",
+      "hold": 300,
+      "selector": "#name"
+    },
+    "timeout": 100
+  },
+  {
+    "expect": {
+      "js": "window.held >= 300"
+    }
+  },
+  {
     "expect": {
       "noText": "chords"
     }

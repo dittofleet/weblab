@@ -31,6 +31,10 @@ export function tail(file: string, count = 3): string {
   }
 }
 
+// What Playwright's call log says stopped an action: something on top
+// of the element, or the element not yet in a state to act on.
+const BLOCKED = /intercepts pointer events$|^element is not |^element is outside of the viewport$|^element was detached/;
+
 /**
  * A failed step's reason in one line. Playwright puts what it was doing
  * in a call log under its first line; a timeout is only useful with
@@ -52,8 +56,12 @@ export function stepError(error: unknown): string {
   const waiting = log.find((entry) => entry.startsWith("waiting for "));
   if (/^Timeout \d+ms exceeded$/.test(line) && waiting !== undefined) {
     line = `${line} ${waiting}`;
+    // An action retries until it times out, so the log ends in retrying
+    // and waiting; why it couldn't act is said further up.
+    const reason = log.findLast((entry) => BLOCKED.test(entry));
     const last = log.at(-1);
-    if (last !== undefined && last !== waiting) line += ` (last: ${last})`;
+    if (reason !== undefined) line += `: ${reason}`;
+    else if (last !== undefined && last !== waiting) line += ` (last: ${last})`;
     if (waiting.includes("aria-ref=")) line += "; refs come from the last look step, so look again after the page changes";
   }
   return line.length > 400 ? `${line.slice(0, 397)}...` : line;

@@ -265,6 +265,12 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   // The page is as the steps left it.
   assert.match((await lab.tool("run", { steps: [{ js: "document.querySelector('#inc').textContent" }] })).text, /"count 1"/);
 
+  // A click that something else would take names what is in the way.
+  const covered = await lab.tool("run", {
+    steps: [{ js: "document.body.insertAdjacentHTML('beforeend', '<div id=pill style=\"position:fixed;inset:0\">pill</div>')" }, { click: "#inc", timeout: 1000 }, { js: "document.querySelector('#pill').remove()" }],
+  });
+  assert.match(covered.text, /FAIL {2}2 click: Timeout 1000ms exceeded waiting for locator\('#inc'\)\.first\(\): <div id="pill">pill<\/div> intercepts pointer events$/m);
+
   // Steps written wrong say how, and take no picture.
   const typo = await lab.tool("run", { steps: [{ clik: "#inc" }] });
   assert.match(typo.text, /unknown step "clik" \(did you mean "click"\?\)/);

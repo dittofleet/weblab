@@ -41,7 +41,7 @@ const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   hover: { keys: ["modifiers", "position", "force", ...POINT], target: true },
   drag: { keys: ["from", "to"] },
   scroll: { keys: ["by", "to"], target: true },
-  press: { keys: ["key"], target: true },
+  press: { keys: ["key", "hold"], target: true },
   type: { keys: ["value", "delay"], target: true },
   fill: { keys: ["value"], target: true },
   select: { keys: ["option"], target: true },
