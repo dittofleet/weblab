@@ -674,6 +674,19 @@ test("an Electron app's main process runs code beside its window, joined by its 
     await lab.tool("new", { name: "app", attach: window.port, inspect: port });
     assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "[(await dialog.showMessageBox({})).response, typeof globalThis[Symbol.for('weblab.stubs')]]" }] })).text, /\[\s*0,\s*"undefined"\s*\]/);
 
+    // Two sessions stubbing one thing can end in either order: the app ends up as it was.
+    for (const first of ["app", "other"]) {
+      await lab.tool("new", { name: "other", attach: window.port, inspect: port });
+      await lab.tool("run", { session: "app", steps: [{ electron: "stub(app, 'getName', () => 'A')" }, { electron: "stub(app, 'getName', () => 'B')", on: "other" }] });
+      await lab.tool("end", { session: first });
+      assert.match((await lab.tool("run", { session: first === "app" ? "other" : "app", steps: [{ electron: "app.getName()" }] })).text, first === "app" ? /"B"/ : /"A"/);
+      await lab.tool("end", { session: first === "app" ? "other" : "app" });
+      await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+      assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]" }] })).text, /\[\s*"fixture",\s*"undefined"\s*\]/);
+    }
+    // Truthy as the main process has it.
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "NaN", timeout: 200 } }] })).text, /expected NaN to be truthy in the main process, it was "NaN"/);
+
     const thrown = await lab.tool("run", { session: "app", steps: [{ electron: "throw new Error('boom')" }] });
     assert.match(thrown.text, /FAIL {2}1 electron: Error: boom\n/);
     assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "throw { code: 42 }" }] })).text, /FAIL {2}1 electron: threw \{"code":42\}/);

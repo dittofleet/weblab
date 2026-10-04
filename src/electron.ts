@@ -13,8 +13,8 @@ import { briefError, SetupError, StepFailure, UsageError } from "./errors.ts";
 export type MainProcess = {
   /** Its process id: the same as the browser process of the app's windows. */
   readonly pid: number;
-  /** Runs code in it, with `electron` and its modules in scope, and hands back the value. */
-  evaluate(code: string, timeout: number): Promise<unknown>;
+  /** Runs code in it, with `electron` and its modules in scope: its value as data, and whether it was truthy there. */
+  evaluate(code: string, timeout: number): Promise<{ value: unknown; truthy: boolean }>;
   /** Puts back what the session's code stubbed, and lets go of it. The app keeps running. */
   close(): Promise<void>;
 };
@@ -22,26 +22,58 @@ export type MainProcess = {
 // What code is handed by name, beside `electron` itself and `require`.
 const MODULES = ["app", "BrowserWindow", "webContents", "ipcMain", "dialog", "Menu", "shell", "session", "clipboard", "nativeTheme", "screen"];
 
-// Where a session's stubs keep what to put back: one property of the
-// app's global, under a symbol of weblab's, gone once nothing is stubbed.
-const STUBS = `globalThis[Symbol.for("weblab.stubs")]`;
+// Run in the app for one session: its `stub(object, name, replacement)`,
+// and what puts back all it stubbed. Each stubbed property keeps its
+// original and a layer per stub over it, whichever session made it, so
+// sessions that stub the same thing can end in any order: the property
+// shows the newest layer left, else the original. One that something
+// else has replaced since is left as that has it. It all lives in one
+// property of the app's global, under a symbol of weblab's, gone once
+// nothing is stubbed.
+const STUBS_FOR = `(session) => {
+  const key = Symbol.for("weblab.stubs");
+  const all = () => (globalThis[key] ??= { slots: new WeakMap(), sessions: {} });
+  const stub = (object, name, replacement) => {
+    const { slots, sessions } = all();
+    let props = slots.get(object);
+    if (props === undefined) slots.set(object, (props = new Map()));
+    let slot = props.get(name);
+    if (slot === undefined) props.set(name, (slot = { original: object[name], layers: [] }));
+    slot.layers.push({ session, replacement });
+    (sessions[session] ??= []).push([object, name]);
+    object[name] = replacement;
+  };
+  const unstub = () => {
+    const stubs = globalThis[key];
+    if (stubs === undefined) return;
+    for (const [object, name] of (stubs.sessions[session] ?? []).reverse()) {
+      const props = stubs.slots.get(object);
+      const slot = props?.get(name);
+      if (slot === undefined) continue;
+      const at = slot.layers.findLastIndex((layer) => layer.session === session);
+      if (at === -1) continue;
+      const [layer] = slot.layers.splice(at, 1);
+      const shown = at === slot.layers.length && object[name] === layer.replacement;
+      try {
+        if (shown) object[name] = slot.layers.length > 0 ? slot.layers[slot.layers.length - 1].replacement : slot.original;
+      } catch {}
+      if (slot.layers.length === 0) props.delete(name);
+      if (props.size === 0) stubs.slots.delete(object);
+    }
+    delete stubs.sessions[session];
+    if (Object.keys(stubs.sessions).length === 0) delete globalThis[key];
+  };
+  return { stub, unstub };
+}`;
 
-// `stub(object, name, replacement)`: the replacement stands in for the
-// rest of the session, and the original is put back when it ends,
-// unless something else has replaced it since.
-const stubFor = (session: string) =>
-  `(object, name, replacement) => { const original = object[name]; ((${STUBS} ??= {})[${JSON.stringify(session)}] ??= []).push(() => { if (object[name] === replacement) object[name] = original; }); object[name] = replacement; }`;
-
-// Puts back a session's stubs, newest first.
-const unstub = (session: string) =>
-  `(() => { const all = ${STUBS}; const mine = all?.[${JSON.stringify(session)}] ?? []; for (const undo of mine.reverse()) { try { undo(); } catch {} } if (all) { delete all[${JSON.stringify(session)}]; if (Object.keys(all).length === 0) delete ${STUBS}; } })()`;
+const stubsFor = (session: string) => `(${STUBS_FOR})(${JSON.stringify(session)})`;
 
 // The code goes in a block of its own, inside the one that hands it its
 // names, so what it declares with const, let and class stays in it and
 // may reuse those names. A block's value is its last statement's, so
 // `const n = app.getName(); n` hands back the name.
 const wrapped = (code: string, session: string) =>
-  `{ const electron = require("electron"); const { ${MODULES.join(", ")} } = electron; const stub = ${stubFor(session)}; { ${code}\n} }`;
+  `{ const electron = require("electron"); const { ${MODULES.join(", ")} } = electron; const { stub } = ${stubsFor(session)}; { ${code}\n} }`;
 
 // Run in the app on what the code handed back: data as it is, and what
 // isn't data as what it is, at any depth: `[BrowserWindow]`, `[Function save]`.
@@ -185,12 +217,23 @@ function consoleText(args: Remote[]): string {
     const arg = rest.shift();
     if (arg === undefined) return whole;
     if (kind === "c") return "";
-    if (kind === "d" || kind === "i") return String(Math.trunc(Number(arg.value)));
-    if (kind === "f") return String(Number(arg.value));
+    // As Node's console reads them: %d a number, %i an integer, %f a float; a BigInt stays one.
+    if (arg.type === "bigint" && kind !== "f") return arg.unserializableValue ?? "";
+    const raw = arg.unserializableValue ?? arg.value;
+    if (kind === "d") return String(Number(raw));
+    if (kind === "i") return String(Number.parseInt(String(raw), 10));
+    if (kind === "f") return String(Number.parseFloat(String(raw)));
     return argText(arg);
   });
   return [filled, ...rest.map(argText)].join(" ");
 }
+
+// Whether a value was truthy where it was, before it is made data: NaN, -0 and 0n are falsy, any object isn't.
+const truthy = (remote: Remote): boolean => {
+  if (remote.type === "undefined" || remote.subtype === "null") return false;
+  if (remote.unserializableValue !== undefined) return !["NaN", "-0", "0n"].includes(remote.unserializableValue);
+  return remote.objectId !== undefined || Boolean(remote.value);
+};
 
 // An error as the step reports it: its own frames, without the ones of the code weblab wrapped.
 const errorText = (description: string) => description.split("\n").filter((line) => !/^\s+at .*<anonymous>/.test(line)).join("\n");
@@ -260,7 +303,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     return new StepFailure(`threw ${JSON.stringify(await asData(exception).catch(() => exception.description))}`);
   }
 
-  async function evaluate(code: string, timeout: number): Promise<unknown> {
+  async function evaluate(code: string, timeout: number): Promise<{ value: unknown; truthy: boolean }> {
     // Read first as written, so a mistake is said about the code itself, not the block it is put in.
     // A script can't await, which a step can: code that reads as an async
     // function's body is no mistake, and one that awaits is told as that.
@@ -300,7 +343,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
       }
       const { result, exceptionDetails } = reply.result as { result: Remote; exceptionDetails?: { text: string; exception?: Remote } };
       if (exceptionDetails !== undefined) throw await failure(exceptionDetails.exception, exceptionDetails.text);
-      return await asData(result);
+      return { value: await asData(result), truthy: truthy(result) };
     } finally {
       clearTimeout(timer);
       void send("Runtime.releaseObjectGroup", { objectGroup: GROUP }).catch(() => {});
@@ -319,7 +362,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
       pid,
       evaluate,
       async close() {
-        await Promise.race([send("Runtime.evaluate", { expression: unstub(session), returnByValue: true }).catch(() => {}), new Promise((done) => setTimeout(done, 2000))]);
+        await Promise.race([send("Runtime.evaluate", { expression: `${stubsFor(session)}.unstub()`, returnByValue: true }).catch(() => {}), new Promise((done) => setTimeout(done, 2000))]);
         gone = "the session has ended";
         socket.close();
       },

@@ -219,15 +219,17 @@ const EXPECTATIONS: Expectation[] = [
       let threw: string | undefined;
       return {
         holds: async () => {
+          let truthy: boolean;
           try {
-            found = await ctx.electron(code);
+            // Truthy as the main process has it: NaN there is falsy, though it comes back as "NaN".
+            ({ value: found, truthy } = await ctx.mainProcess().evaluate(code, ctx.timeout));
             threw = undefined;
           } catch (error) {
             if (error instanceof UsageError) throw error;
             threw = briefError(error);
             return false;
           }
-          return Boolean(found);
+          return truthy;
         },
         wanted: () => (threw === undefined ? `${short(code)} to be truthy in the main process, it was ${short(JSON.stringify(found) ?? String(found))}` : `${short(code)} to be truthy in the main process, but it threw: ${threw}`),
       };

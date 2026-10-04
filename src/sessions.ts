@@ -422,11 +422,14 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
         }
         return connection.send(method as never, params as never);
       },
-      electron(code, arg) {
+      mainProcess() {
         if (main === null) throw new UsageError("electron: this session has no main process to run code in; open it with inspect, the port the app's --inspect gave it");
+        return main;
+      },
+      async electron(code, arg) {
         // A function is called with the electron module and the argument, as Playwright's electronApp.evaluate does.
         const source = typeof code === "function" ? `await (${code.toString()})(electron, ${JSON.stringify(arg) ?? "undefined"})` : code;
-        return main.evaluate(source, ctx.timeout);
+        return (await ctx.mainProcess().evaluate(source, ctx.timeout)).value;
       },
       windowed: browser.windowed,
       get video() {

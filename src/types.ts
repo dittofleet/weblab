@@ -1,4 +1,5 @@
 import type { BrowserContext, Locator, Page } from "playwright-core";
+import type { MainProcess } from "./electron.ts";
 import type { Film } from "./film.ts";
 
 export type Viewport = {
@@ -128,6 +129,8 @@ export type ActionContext = {
    * whose last one's value it is, or a function given `electron` and `arg`. Needs `inspect`.
    */
   electron(code: string | ((electron: any, arg: any) => unknown), arg?: unknown): Promise<unknown>;
+  /** The attached Electron app's main process, as `electron` and `expect` use it. A usage error if the session has none. */
+  mainProcess(): MainProcess;
   /** Turns a target (a selector, a ref, `{ role, name }`, ...) into a Playwright locator, as the built-in steps do. */
   locate(target: unknown, options?: { all?: boolean }): Locator;
   /** The `params` the run was given, for code to read. */
