@@ -197,9 +197,6 @@ export function sourceMapper(fetchText: (url: string) => Promise<string | null>,
   // page evaluated under a name of its own, from the browser's debugger.
   const readText = (url: string) => (url.startsWith("file:") ? readFile(fileURLToPath(url), "utf8").catch(() => null) : fetchText(url));
 
-  // Where a path is on disk: as it stands, or in the project once the
-  // leading parts a tool put before it are dropped (a server's route, a
-  // bundler's name for the project). Asked once a path.
   const found = new Map<string, string>();
   // Where a path is on disk. A file named on disk stays as it is. A path a source map named
   // may also be the project's under leading parts a bundler put before it (its name for the

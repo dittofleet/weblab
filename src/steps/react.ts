@@ -79,7 +79,7 @@ async function classify(ctx: ActionContext): Promise<void> {
 const productionTold = new WeakMap<object, number>();
 
 /** What the page says of a call: its value, or that the step asked for what isn't there (with the names near it). */
-type Answer<T> = { value: T } | { refused: string; names: string[] };
+type Answer<T> = { value: T } | { refused: string; names: string[]; server?: boolean };
 
 // Runs one of weblab.react's own calls in the page. A refusal is the step
 // being written wrong, and anything the page throws is the step failing.
@@ -151,7 +151,7 @@ type Inspected = {
 type Watching = "start" | "late" | "none";
 
 /** The component whose code wrote an element, when a wrapper around it rendered it. */
-type Writer = { element: string; id: string; name: string; made: Made } | null;
+type Writer = { element: string; id: string | null; name: string; made: Made } | null;
 
 // Hooks under the custom hooks they are called in, as React DevTools shows them.
 function hookLines(hooks: Inspected["hooks"]): string[] {
@@ -192,7 +192,7 @@ async function inspectText(ctx: ActionContext, found: Inspected, writer: Writer,
   const elements = found.elementCount === 0 ? "none" : `${found.elements.join(" ")}${found.elementCount > found.elements.length ? ` …${found.elementCount - found.elements.length} more` : ""}`;
   field("elements", elements);
   if (via !== null) field("via", `${via.name} [${via.id}] from ${via.from ?? "node_modules"} rendered the element ("library": true inspects it)`);
-  if (writer !== null) field("written", `${writer.name} [${writer.id}] wrote the ${writer.element}${written === null ? "" : `, at ${placeText(written)}`}, and ${found.name} renders it`);
+  if (writer !== null) field("written", `${writer.name}${writer.id === null ? "" : ` [${writer.id}]`} wrote the ${writer.element}${written === null ? "" : `, at ${placeText(written)}`}, and ${found.name} renders it`);
   if (found.renders !== null) field("renders", `${found.renders} since the page loaded`);
   const block = (title: string, rows: string[]) => {
     if (rows.length > 0) lines.push(title, ...rows.map((row) => `  ${row}`));
@@ -293,12 +293,18 @@ export const reactSteps: Record<string, Action> = {
     // A production build says so once a page, before what it hands back can mislead.
     if (productionTold.get(ctx.page) !== ctx.loads() && (await inPage<boolean>(ctx, "_production"))) {
       productionTold.set(ctx.page, ctx.loads());
-      ctx.note("this page runs a production build of React: names are minified, there are no source locations, and nothing can be changed");
+      ctx.note("this page runs a production build of React: names are minified, there are no source locations, and nothing can be changed. The app's development build has all of these");
     }
     switch (action) {
       case "tree": {
         const depth = given.depth === undefined ? null : Number(given.depth);
-        const under = target === true ? null : (await component(ctx, target, nth, library)).id;
+        // A server component's name starts the tree at what it rendered, as it has no id of its own.
+        let under: string | { server: string; nth: number } | null = null;
+        if (typeof target === "string" && !REF.test(target)) {
+          const answer = await ask<string>(ctx, "_resolve", [target, nth ?? 0]);
+          if ("refused" in answer && answer.server) under = { server: target, nth: nth ?? 0 };
+        }
+        if (under === null && target !== true) under = (await component(ctx, target, nth, library)).id;
         const tree = await inPage<{ lines: string[]; more: number; hidden: number }>(ctx, "_tree", [under, depth, TREE_LIMIT, library]);
         if (tree.more > 0) tree.lines.push(`… ${tree.more} more components (give tree a component to start from, or a depth)`);
         if (tree.hidden > 0) tree.lines.push(`(${plural(tree.hidden, "component")} from node_modules left out, shown with "library": true)`);

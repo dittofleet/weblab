@@ -241,7 +241,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       const names = new Set<string>();
       for (const [fiber] of walk()) if (COMPOSITE.has(fiber.tag)) names.add(nameOf(fiber));
       if (serverNames().has(String(target))) {
-        throw refuse(`${target} is a server component: it rendered on the server, so the page holds only what it rendered, not it. { "react": "tree" } shows it, and the components it rendered`);
+        throw Object.assign(refuse(`${target} is a server component: it ran on the server, so the page has what it rendered but not ${target} itself. { "react": { "tree": "${target}" } } shows what it rendered, and inspecting a client component under it names ${target} as an owner`), { server: true });
       }
       throw Object.assign(refuse(`no component named ${target} is on the page`), { names: [...names, ...serverNames()] });
     }
@@ -286,6 +286,8 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     if (value === null) return "null";
     if (seen.has(value)) return "[circular]";
     if (ELEMENTS.has(value.$$typeof)) return `<${typeName(value.type)} />`;
+    // An element still to come (a lazy one, as a server's are on the way in).
+    if (value.$$typeof === Symbol.for("react.lazy")) return "<lazy />";
     if (typeof Node !== "undefined" && value instanceof Node) return describeNode(value);
     if (value instanceof Date) return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
     if (value instanceof RegExp) return String(value);
@@ -481,7 +483,8 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     return null;
   };
   const LIBRARY_FILE = /[/\\]node_modules[/\\]/;
-  // The package a file in node_modules is from: "@tanstack/react-query". A tool's own folder there
+  // The package a file in node_modules is from: "@tanstack/react-query". src/sources.ts has the
+  // same for source maps' paths, which this script can't import. A tool's own folder there
   // (one whose name starts with a dot, holding what it prepared) doesn't say, and its source map does.
   const packageOf = (file: string): string | null => {
     const at = file.lastIndexOf("node_modules/");
@@ -1007,6 +1010,14 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     const renderer = id === undefined ? [...renderers.values()].find((one) => typeof one.overrideProps === "function") : renderers.get(id);
     return renderer ?? null;
   };
+  // What each change is, said in a reply about a React that can't make it.
+  const CHANGES: Record<string, string> = {
+    overrideProps: "set a prop",
+    overrideHookState: "set a hook's state",
+    scheduleUpdate: "render a component again",
+    setSuspenseHandler: "force a Suspense boundary",
+    setErrorHandler: "force an error boundary",
+  };
   const changer = (fiber: Fiber, method: string): Renderer => {
     const renderer = rendererOf(fiber);
     if (renderer && typeof renderer[method] === "function") return renderer;
@@ -1014,10 +1025,11 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       throw new Error(`React loaded before weblab's hook was in the page, so it can't be changed from here. Reload the page, and weblab's hook goes in before React from then on`);
     }
     if (renderer && typeof renderer.overrideProps === "function") {
-      const version = renderer.reconcilerVersion ?? renderer.version ?? "this version";
-      throw new Error(`React ${version} can't do this from outside (React 18 and later can)`);
+      const version = renderer.reconcilerVersion ?? renderer.version;
+      const newer = method === "setErrorHandler" ? ". React 18 and later can" : "";
+      throw new Error(`${version ? `React ${version}` : "This version of React"} can't ${CHANGES[method] ?? "make this change"} from outside${newer}`);
     }
-    throw new Error(`this React can't be changed from outside: it is a production build (a development build can)`);
+    throw new Error(`this React can't be changed from outside: it is a production build. The app's development build can be`);
   };
   const notOnPage = () => {
     if (allRoots().length > 0) return null;
@@ -1077,6 +1089,19 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       serverIndex = { frames, commits, at: performance.now() };
     }
     return (serverIndex as { frames: Map<ServerInfo, string> }).frames.get(info) ?? null;
+  };
+  /** A server component's line in a tree: its name, marked, with its key and a few short props. */
+  const serverLine = (info: ServerInfo, level: number) => {
+    const bits = [...(info.key != null ? [`key=${JSON.stringify(info.key)}`] : []), ...propBits(info.props)];
+    return `${"  ".repeat(level)}- ${info.name} (server)${bits.length > 0 ? ` ${bits.join(" ")}` : ""}`;
+  };
+  /** The nth (from 0) server component with a name, in the order of the tree. */
+  const serverNamed = (name: string, nth: number): ServerInfo => {
+    const seen: ServerInfo[] = [];
+    for (const [fiber] of walk()) for (const info of serverInfos(fiber)) if (info.name === name && !seen.includes(info)) seen.push(info);
+    const info = seen[nth];
+    if (info === undefined) throw refuse(seen.length === 0 ? `no server component named ${name} is on the page` : `there ${seen.length === 1 ? "is one" : `are ${seen.length}`} ${name}, so no nth ${nth} (nth counts from 0)`);
+    return info;
   };
   // Whether a server component is a library's, by the file its code is in, as weblab looked it up.
   const serverVerdicts = new Map<string, { library: boolean; from: string | null }>();
@@ -1192,7 +1217,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
         return { value: await (react as any)[call](...args) };
       } catch (error: any) {
         if (error?.name !== "WeblabRefused") throw error;
-        return { refused: String(error.message), names: (error.names as string[] | undefined) ?? [] };
+        return { refused: String(error.message), names: (error.names as string[] | undefined) ?? [], server: error.server === true };
       }
     },
     /** True when every React on the page is a production build: names minified, no source locations, nothing to change. */
@@ -1272,6 +1297,8 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       const host = fiberOfNode(node);
       const inside = componentOf(host);
       const owner = ownerOf(host);
+      // A server component wrote it: named, though it has no id, as it isn't in the page.
+      if (owner && owner.tag === undefined && typeof owner.name === "string") return { element: describeNode(node), id: null, name: `${owner.name} (server)`, made: madeAt(host) };
       if (!owner || owner.tag === undefined || !COMPOSITE.has(owner.tag) || (inside && (owner === inside || owner === inside.alternate))) return null;
       const now = current(owner) ?? owner;
       return { element: describeNode(node), id: `c${idOf(now)}`, name: nameOf(now), made: madeAt(host) };
@@ -1285,7 +1312,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       }
       return firsts.filter((element): element is Element => element !== undefined && root.contains(element));
     },
-    _tree(under: string | null, depth: number | null, limit: number, library: boolean) {
+    _tree(under: string | { server: string; nth: number } | null, depth: number | null, limit: number, library: boolean) {
       const missing = notOnPage();
       if (missing !== null) throw new Error(missing);
       const lines: string[] = [];
@@ -1297,19 +1324,31 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
         if (under === null) for (const [fiber] of walk(root.current)) if (shown(fiber)) hidden += 1;
         return false;
       });
-      const starts = under === null ? shownRoots.map((root) => root.current) : [resolve(under)];
+      // A server component is in the page only as what it rendered: those fibers, under a line for it.
+      let starts: Fiber[];
+      let asked: ServerInfo | null = null;
+      if (under === null) starts = shownRoots.map((root) => root.current);
+      else if (typeof under === "string") starts = [resolve(under)];
+      else {
+        asked = serverNamed(under.server, under.nth);
+        starts = [];
+        for (const [fiber, parent] of walk()) {
+          if (serverInfos(fiber).includes(asked) && !(parent && serverInfos(parent).includes(asked))) starts.push(fiber);
+        }
+        lines.push(serverLine(asked, 0));
+      }
       for (const start of starts) {
         if (under === null) lines.push(`- root ${describeNode(start.stateNode?.containerInfo)}`);
         // How deep among the components shown each fiber is: under the
-        // root line from 1, or from 0 for a component asked for.
+        // root line, or a server component's, from 1, or from 0 for a component asked for.
         const levels = new Map<Fiber, number>();
-        const servers = new Map<ServerInfo, number>();
-        const base = under === null ? 0 : -1;
+        const servers = new Map<ServerInfo, number>(asked ? [[asked, 0]] : []);
+        const base = typeof under === "string" ? -1 : 0;
         for (const [fiber, parent] of walk(start)) {
           let above = parent === null ? base : (levels.get(parent) as number);
-          // The server components that rendered this, each once, under the one that rendered it.
+          // The server components that rendered this, each once, where they rendered.
           // A tree asked for from a component starts at it, not at the server components above it.
-          for (const info of fiber === start && under !== null ? [] : serverInfos(fiber)) {
+          for (const info of fiber === start && typeof under === "string" ? [] : serverInfos(fiber)) {
             const placed = servers.get(info);
             if (placed !== undefined) {
               above = placed;
@@ -1321,15 +1360,13 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
               hidden += 1;
               continue;
             }
-            const level = info.owner && servers.has(info.owner) ? (servers.get(info.owner) as number) + 1 : above + 1;
+            // Where it rendered, which is inside a client component when it was passed in as children.
+            const level = above + 1;
             servers.set(info, level);
             above = level;
             if (depth !== null && level > depth) continue;
             if (lines.length >= limit) more += 1;
-            else lines.push(`${"  ".repeat(level)}- ${info.name} (server)${info.key != null ? ` key=${JSON.stringify(info.key)}` : ""}${(() => {
-              const bits = propBits(info.props);
-              return bits.length > 0 ? ` ${bits.join(" ")}` : "";
-            })()}`);
+            else lines.push(serverLine(info, level));
           }
           // Components from node_modules are left out unless asked for, and what they render is shown under the nearest shown above.
           const hide = shown(fiber) && !library && fiber !== start && fromLibrary(fiber);

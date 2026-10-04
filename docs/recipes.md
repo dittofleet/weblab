@@ -106,7 +106,7 @@ A component that renders while nothing is happening points to a loop or a timer.
 
 ## Show a React loading or error state
 
-`suspend` makes a Suspense boundary show its fallback, and `error` makes an error boundary show its error state, for as long as it takes to look:
+`suspend` makes a Suspense boundary show its fallback, and `error` makes an error boundary show its error state (with React 18 or later), for as long as it takes to look:
 
 `run`
 

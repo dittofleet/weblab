@@ -296,7 +296,7 @@ file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
 | `{ "react": { "suspend": "Products" } }` | Makes the `Suspense` boundary around the component show its fallback, until `{ "react": { "suspend": false } }`. |
 | `{ "react": { "error": "Checkout" } }` | Makes the error boundary around the component show its error state, until `{ "react": { "error": false } }`. |
 
-It works with a development build of React 16.14 or later, in any browser, with whatever bundler or framework serves it. Forcing an error boundary needs React 18 or later. In a production build, names are minified, there are no source locations, and nothing can be changed, and the first step on such a page says so.
+It works with a development build of React 16.14 or later, in any browser and with any bundler or framework. Forcing an error boundary needs React 18 or later. In a production build, names are minified, there are no source locations, and nothing can be changed. The first `react` step on such a page says so.
 
 The tree is the app's components, each with what it was given (a key, a few short props) and its id:
 
@@ -441,20 +441,21 @@ hooks
 
 `"library": true` takes library components in, in all of these. A reply about a boundary from a library names its package.
 
-Which components are a library's is told by where their code is. Where a bundler hides that in its own chunks, weblab reads it from the chunks' source maps. A second copy of React that a tool brings along as a production build (a framework's development overlay, say) is left out whole the same way.
+weblab tells a library's components by the file their code is in. When a bundler packs `node_modules` into chunks of its own, weblab finds the file through the chunks' source maps. This goes for server components too. A tool that renders with its own production build of React next to the app's development build (a framework's development overlay, say) is left out whole, with everything it renders.
 
 ### Server components
 
-A React server component runs on the server, so the page holds only what it rendered. The tree shows it where it rendered, marked as a server component, with its props:
+A React server component runs on the server, so the page has what it rendered but not the component itself. The tree shows it where it rendered, marked `(server)`, with its props:
 
 ```text
-- RootLayout (server)
-  - Home (server)
-    - Heading (server) text="Welcome"
-    - Counter label="clicks" [c47]
+- root #document
+  - RootLayout (server)
+    - Home (server)
+      - Heading (server) text="Welcome"
+      - Counter label="clicks" [c47]
 ```
 
-It has no id, as there is nothing of it in the page to inspect or change. Asking for one by name says so. A client component it rendered names it among its owners, and its `used at` line points into the server component's code.
+It has no id, as there is nothing of it in the page to inspect or change, and asking to inspect one by name says so. `{ "react": { "tree": "Home" } }` shows what it rendered. A client component it rendered names it among its owners, and its `used at` line points at the server component's file, and at the line too when the server's code has a source map. Named by an element a server component wrote, `inspect` opens the client component around the element and names the server component on its `written` line. Server components don't render in the page, so `renders` doesn't count them.
 
 ### How weblab sees React
 
