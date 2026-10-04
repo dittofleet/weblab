@@ -11,9 +11,9 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from 
 import { isAbsolute, join, resolve } from "node:path";
 import { type CDPSession, type Page } from "playwright-core";
 import { originOf, resolveApp } from "./app.ts";
-import { createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
+import { browserProcess, createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
 import { withoutCursor } from "./cursor.ts";
-import { browserProcess, joinMainProcess, type MainProcess } from "./electron.ts";
+import { joinMainProcess, type MainProcess } from "./electron.ts";
 import { SetupError, StepFailure, stepError, UsageError } from "./errors.ts";
 import { filming } from "./film.ts";
 import { record, type Recorder } from "./recorder.ts";

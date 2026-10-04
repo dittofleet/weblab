@@ -207,7 +207,8 @@ async function answering(work: () => Promise<Result>): Promise<Result> {
 
 const describe = (open: Session): string => {
   const { attach, inspect } = open.app.settings;
-  const at = open.attached ? `attached to ${attach}${inspect === undefined ? "" : `, main process at ${inspect}`}${open.address === null ? "" : `, at ${open.address}`}` : `at ${open.address}`;
+  const where = open.attached ? [`attached to ${attach}`, inspect !== undefined && `main process at ${inspect}`, open.address !== null && `at ${open.address}`] : [`at ${open.address}`];
+  const at = where.filter(Boolean).join(", ");
   const server = open.server?.owned ? ` (server started by weblab: ${open.server.command})` : "";
   return `${open.name}  ${at}${server}`;
 };

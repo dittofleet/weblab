@@ -6,8 +6,10 @@
 // its own and speaks the same protocol's Runtime domain. Nothing is
 // opened that the app wasn't started with: weblab never turns the
 // debugger on itself.
-import type { BrowserContext } from "playwright-core";
+import { setTimeout as sleep } from "node:timers/promises";
+import { endpoint } from "./browser.ts";
 import { briefError, SetupError, StepFailure, UsageError } from "./errors.ts";
+import { fillFormat } from "./recorder.ts";
 
 /** The main process of the app a session is attached to. */
 export type MainProcess = {
@@ -115,26 +117,6 @@ const AS_DATA = `function () {
   return walk(this, 0);
 }`;
 
-/** The process of the browser an attached context is in: an Electron app's main process. Null if it won't say. */
-export async function browserProcess(context: BrowserContext): Promise<number | null> {
-  const browser = context.browser();
-  if (browser === null) return null;
-  const cdp = await browser.newBrowserCDPSession().catch(() => null);
-  if (cdp === null) return null;
-  try {
-    const { processInfo } = (await cdp.send("SystemInfo.getProcessInfo" as never)) as { processInfo: { type: string; id: number }[] };
-    return processInfo.find((one) => one.type === "browser")?.id ?? null;
-  } catch {
-    return null;
-  } finally {
-    await cdp.detach().catch(() => {});
-  }
-}
-
-/** `9229`, `localhost:9229`, or a full http:// or ws:// address. */
-const endpoint = (inspect: string) =>
-  /^\d+$/.test(inspect) ? `http://127.0.0.1:${inspect}` : /^[a-z]+:\/\//.test(inspect) ? inspect : `http://${inspect}`;
-
 type Message = { id?: number; method?: string; params?: any; result?: any; error?: { code: number; message: string } };
 
 type Target = { type?: string; webSocketDebuggerUrl?: string };
@@ -207,25 +189,19 @@ function argText(arg: Remote): string {
   return arg.description ?? JSON.stringify(arg.value);
 }
 
-// A console call as it reads: `%s` and its kin filled in from the arguments, `%c` dropped.
+// One argument as a format's `%d`, `%i` or `%f` reads it, as Node's console does; a BigInt stays one.
+function formatArg(arg: Remote, kind: string): string {
+  if (!"dif".includes(kind)) return argText(arg);
+  if (arg.type === "bigint" && kind !== "f") return arg.unserializableValue ?? "";
+  const raw = String(arg.unserializableValue ?? arg.value);
+  return String(kind === "d" ? Number(raw) : kind === "i" ? Number.parseInt(raw, 10) : Number.parseFloat(raw));
+}
+
+// A console call as it reads.
 function consoleText(args: Remote[]): string {
   const [first, ...rest] = args;
-  if (first === undefined) return "";
-  if (first.type !== "string" || !String(first.value).includes("%")) return args.map(argText).join(" ");
-  const filled = String(first.value).replace(/%([sdifoOc%])/g, (whole, kind: string) => {
-    if (kind === "%") return "%";
-    const arg = rest.shift();
-    if (arg === undefined) return whole;
-    if (kind === "c") return "";
-    // As Node's console reads them: %d a number, %i an integer, %f a float; a BigInt stays one.
-    if (arg.type === "bigint" && kind !== "f") return arg.unserializableValue ?? "";
-    const raw = arg.unserializableValue ?? arg.value;
-    if (kind === "d") return String(Number(raw));
-    if (kind === "i") return String(Number.parseInt(String(raw), 10));
-    if (kind === "f") return String(Number.parseFloat(String(raw)));
-    return argText(arg);
-  });
-  return [filled, ...rest.map(argText)].join(" ");
+  if (first?.type !== "string" || !String(first.value).includes("%")) return args.map(argText).join(" ");
+  return fillFormat(String(first.value), rest, formatArg);
 }
 
 // Whether a value was truthy where it was, before it is made data: NaN, -0 and 0n are falsy, any object isn't.
@@ -268,10 +244,8 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
   };
   socket.onclose = () => {
     gone ??= "the app's main process went away: it quit or restarted. End the session and open it again";
-    for (const [id, one] of waiting) {
-      waiting.delete(id);
-      one.failed(new StepFailure(gone));
-    }
+    for (const one of waiting.values()) one.failed(new StepFailure(gone));
+    waiting.clear();
   };
 
   const send = (method: string, params: Record<string, unknown> = {}) =>
@@ -295,13 +269,17 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
 
   async function failure(exception: Remote | undefined, text: string): Promise<Error> {
     if (exception === undefined) return new StepFailure(text);
+    const description = errorText(exception.description ?? text);
     if (exception.className === "SyntaxError") {
-      const hint = /Illegal return/.test(exception.description ?? "") ? " (an electron step hands back its last statement's value; it needs no return)" : "";
-      return new UsageError(`electron: ${errorText(exception.description ?? text)}${hint}`);
+      const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value; it needs no return)" : "";
+      return new UsageError(`electron: ${description}${hint}`);
     }
-    if (exception.subtype === "error") return new StepFailure(errorText(exception.description ?? text));
+    if (exception.subtype === "error") return new StepFailure(description);
     return new StepFailure(`threw ${JSON.stringify(await asData(exception).catch(() => exception.description))}`);
   }
+
+  // Code read once is known to be well formed; an expect polling it isn't read again.
+  const wellFormed = new Set<string>();
 
   async function evaluate(code: string, timeout: number): Promise<{ value: unknown; truthy: boolean }> {
     // Read first as written, so a mistake is said about the code itself, not the block it is put in.
@@ -309,14 +287,19 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     // function's body is no mistake, and one that awaits is told as that.
     const compile = async (expression: string) =>
       (await send("Runtime.compileScript", { expression, sourceURL: "", persistScript: false })).result?.exceptionDetails as { text: string; exception?: Remote } | undefined;
-    const asScript = await compile(code);
-    if (asScript !== undefined) {
-      const asBody = await compile(`(async () => {\n${code}\n})`);
-      const mistake = /\bawait\b/.test(code) ? asBody : asScript;
-      if (asBody !== undefined && mistake !== undefined) throw await failure(mistake.exception, mistake.text);
+    if (!wellFormed.has(code)) {
+      const asScript = await compile(code);
+      const asBody = asScript === undefined ? undefined : await compile(`(async () => {\n${code}\n})`);
+      if (asScript !== undefined && asBody !== undefined) {
+        const mistake = /\bawait\b/.test(code) ? asBody : asScript;
+        throw await failure(mistake.exception, mistake.text);
+      }
+      wellFormed.add(code);
     }
     const begun = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Objects it handed back or threw are held in the app until let go of.
+    let held = false;
     // Past the timeout, code is either busy (a loop after an await, which
     // the debugger's own timeout doesn't cover) or waiting. Busy code keeps
     // the event loop from turning, and is stopped; code that waits is left.
@@ -324,9 +307,9 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     const late = new Promise<never>((_, failed) => {
       timer = setTimeout(async () => {
         const turned = send("Runtime.evaluate", { expression: "new Promise((done) => setImmediate(() => done(true)))", awaitPromise: true, returnByValue: true });
-        const free = await Promise.race([turned.then(() => true, () => true), new Promise<boolean>((done) => setTimeout(() => done(false), 500))]);
+        const free = await Promise.race([turned.then(() => true, () => true), sleep(500, false)]);
         if (free) return failed(new StepFailure(`what the code awaited hadn't settled after ${timeout}ms; it may still settle in the app`));
-        await Promise.race([send("Runtime.terminateExecution").catch(() => {}), new Promise((done) => setTimeout(done, 1000))]);
+        await Promise.race([send("Runtime.terminateExecution").catch(() => {}), sleep(1000)]);
         failed(new StepFailure(`the code kept the main process busy past ${timeout}ms, and was stopped`));
       }, timeout + 250);
     });
@@ -342,11 +325,12 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
         throw new StepFailure(reply.error.message);
       }
       const { result, exceptionDetails } = reply.result as { result: Remote; exceptionDetails?: { text: string; exception?: Remote } };
+      held = result.objectId !== undefined || exceptionDetails?.exception?.objectId !== undefined;
       if (exceptionDetails !== undefined) throw await failure(exceptionDetails.exception, exceptionDetails.text);
       return { value: await asData(result), truthy: truthy(result) };
     } finally {
       clearTimeout(timer);
-      void send("Runtime.releaseObjectGroup", { objectGroup: GROUP }).catch(() => {});
+      if (held) void send("Runtime.releaseObjectGroup", { objectGroup: GROUP }).catch(() => {});
     }
   }
 
@@ -362,7 +346,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
       pid,
       evaluate,
       async close() {
-        await Promise.race([send("Runtime.evaluate", { expression: `${stubsFor(session)}.unstub()`, returnByValue: true }).catch(() => {}), new Promise((done) => setTimeout(done, 2000))]);
+        await Promise.race([send("Runtime.evaluate", { expression: `${stubsFor(session)}.unstub()`, returnByValue: true }).catch(() => {}), sleep(2000)]);
         gone = "the session has ended";
         socket.close();
       },

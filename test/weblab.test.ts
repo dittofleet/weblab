@@ -633,6 +633,9 @@ test("an Electron app's main process runs code beside its window, joined by its 
     const opened = await lab.tool("new", { name: "app", attach: window.port, inspect: port });
     assert.equal(opened.failed, false, opened.text);
     assert.match(opened.text, new RegExp(`^session app {2}attached to ${window.port}, main process at ${port}\n`));
+    // One electron step on a session, and the reply.
+    const inMain = async (code: string, options: { session?: string; timeout?: number } = {}) =>
+      (await lab.tool("run", { session: options.session ?? "app", steps: [{ electron: code, ...(options.timeout === undefined ? {} : { timeout: options.timeout }) }] })).text;
 
     const ran = await lab.tool("run", {
       session: "app",
@@ -672,41 +675,40 @@ test("an Electron app's main process runs code beside its window, joined by its 
     assert.match(stubbed.text, /ok {4}1 electron \(\d+ms\)\nok {4}2 electron \(\d+ms\)\n\{\s*"response": 1,\s*"real": "function"\s*\}/);
     await lab.tool("end", { session: "app" });
     await lab.tool("new", { name: "app", attach: window.port, inspect: port });
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "[(await dialog.showMessageBox({})).response, typeof globalThis[Symbol.for('weblab.stubs')]]" }] })).text, /\[\s*0,\s*"undefined"\s*\]/);
+    assert.match(await inMain("[(await dialog.showMessageBox({})).response, typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*0,\s*"undefined"\s*\]/);
 
     // Two sessions stubbing one thing can end in either order: the app ends up as it was.
-    for (const first of ["app", "other"]) {
+    for (const [first, second, left] of [["app", "other", /"B"/], ["other", "app", /"A"/]] as const) {
       await lab.tool("new", { name: "other", attach: window.port, inspect: port });
       await lab.tool("run", { session: "app", steps: [{ electron: "stub(app, 'getName', () => 'A')" }, { electron: "stub(app, 'getName', () => 'B')", on: "other" }] });
       await lab.tool("end", { session: first });
-      assert.match((await lab.tool("run", { session: first === "app" ? "other" : "app", steps: [{ electron: "app.getName()" }] })).text, first === "app" ? /"B"/ : /"A"/);
-      await lab.tool("end", { session: first === "app" ? "other" : "app" });
+      assert.match(await inMain("app.getName()", { session: second }), left);
+      await lab.tool("end", { session: second });
       await lab.tool("new", { name: "app", attach: window.port, inspect: port });
-      assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]" }] })).text, /\[\s*"fixture",\s*"undefined"\s*\]/);
+      assert.match(await inMain("[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*"fixture",\s*"undefined"\s*\]/);
     }
     // Truthy as the main process has it.
     assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "NaN", timeout: 200 } }] })).text, /expected NaN to be truthy in the main process, it was "NaN"/);
 
-    const thrown = await lab.tool("run", { session: "app", steps: [{ electron: "throw new Error('boom')" }] });
-    assert.match(thrown.text, /FAIL {2}1 electron: Error: boom\n/);
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "throw { code: 42 }" }] })).text, /FAIL {2}1 electron: threw \{"code":42\}/);
+    assert.match(await inMain("throw new Error('boom')"), /FAIL {2}1 electron: Error: boom\n/);
+    assert.match(await inMain("throw { code: 42 }"), /FAIL {2}1 electron: threw \{"code":42\}/);
     // A mistake in the code is said in the app's own words, about the code as written.
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "app.getName(" }] })).text, /electron: SyntaxError: (missing \) after argument list|Unexpected end of input)/);
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "return 1" }] })).text, /Illegal return statement \(an electron step hands back its last statement's value; it needs no return\)/);
+    assert.match(await inMain("app.getName("), /electron: SyntaxError: (missing \) after argument list|Unexpected end of input)/);
+    assert.match(await inMain("return 1"), /Illegal return statement \(an electron step hands back its last statement's value; it needs no return\)/);
     // Code that keeps the main process busy is stopped, before an await or after one; the app goes on.
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "while (true) {}", timeout: 500 }] })).text, /FAIL {2}1 electron: the code kept the main process busy for 500ms, and was stopped/);
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "await null; while (true) {}", timeout: 500 }] })).text, /FAIL {2}1 electron: the code kept the main process busy past 500ms, and was stopped/);
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "app.getName()" }] })).text, /"fixture"/);
+    assert.match(await inMain("while (true) {}", { timeout: 500 }), /FAIL {2}1 electron: the code kept the main process busy for 500ms, and was stopped/);
+    assert.match(await inMain("await null; while (true) {}", { timeout: 500 }), /FAIL {2}1 electron: the code kept the main process busy past 500ms, and was stopped/);
+    assert.match(await inMain("app.getName()"), /"fixture"/);
     // Code that only waits is left to it.
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "await new Promise(() => {})", timeout: 300 }] })).text, /hadn't settled after 300ms/);
+    assert.match(await inMain("await new Promise(() => {})", { timeout: 300 }), /hadn't settled after 300ms/);
 
     // An app that exits isn't kept waiting for weblab to let go of it, and the session says it's gone.
-    await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => process.exit(0), 50); 1" }] });
+    await inMain("setTimeout(() => process.exit(0), 50); 1");
     assert.equal(await Promise.race([main.exited.then(() => true), sleep(5000).then(() => false)]), true, "the main process exited");
-    assert.match((await lab.tool("run", { session: "app", steps: [{ electron: "app.getName()" }] })).text, /the app's main process went away: it quit or restarted\. End the session and open it again/);
+    assert.match(await inMain("app.getName()"), /the app's main process went away: it quit or restarted\. End the session and open it again/);
 
     await lab.tool("new", { name: "plain", attach: window.port });
-    assert.match((await lab.tool("run", { session: "plain", steps: [{ electron: "1" }] })).text, /this session has no main process to run code in; open it with inspect/);
+    assert.match(await inMain("1", { session: "plain" }), /this session has no main process to run code in; open it with inspect/);
     // So does one whose window went: steps can't be run on an app that isn't there.
     window.stop();
     await sleep(500);

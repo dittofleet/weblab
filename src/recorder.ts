@@ -16,18 +16,27 @@ const MAX_CONSOLE_LINE = 1000;
 // What every dev server says on every page load, and nobody needs to read.
 const ALWAYS_IGNORED = [/^\[console\.debug\] \[vite\] connect(ing|ed)/];
 
-// A console message as the browser would show it: `%s` and its kin
-// filled in from the arguments, `%c` styling dropped, colour codes gone.
+/**
+ * A console format filled in from its arguments, as a console does:
+ * `%s` and its kin each take one, as `text` reads it for that kind,
+ * `%c` styling is dropped, and what is left over follows.
+ */
+export function fillFormat<T>(format: string, args: T[], text: (arg: T, kind: string) => string): string {
+  const rest = [...args];
+  const filled = format.replace(/%([sdifoOc%])/g, (whole, kind: string) => {
+    if (kind === "%") return "%";
+    if (rest.length === 0) return whole;
+    const arg = rest.shift() as T;
+    return kind === "c" ? "" : text(arg, kind);
+  });
+  return [filled, ...rest.map((arg) => text(arg, "s"))].join(" ");
+}
+
+// A console message as the browser would show it, colour codes gone.
 function consoleText(message: ConsoleMessage): string {
   const [format, ...rest] = message.args().map((handle) => handle.toString());
   if (format === undefined || !format.includes("%")) return stripAnsi(message.text());
-  const filled = format.replace(/%([sdifoOc%])/g, (whole, kind: string) => {
-    if (kind === "%") return "%";
-    const value = rest.shift();
-    if (value === undefined) return whole;
-    return kind === "c" ? "" : value;
-  });
-  return stripAnsi([filled, ...rest].join(" "));
+  return stripAnsi(fillFormat(format, rest, (value) => value));
 }
 
 // The tab a request or response belongs to; a service worker's belongs to none.
@@ -185,8 +194,9 @@ export function record(
     ignore,
     note,
     fromMain(type, text) {
-      const entry = { type, text: cut(text, MAX_CONSOLE_LINE), process: "main" as const };
-      heard(type === "error" ? "console" : null, `[main console.${type}] ${text}`, entry, null);
+      const plain = stripAnsi(text);
+      const entry = { type, text: cut(plain, MAX_CONSOLE_LINE), process: "main" as const };
+      heard(type === "error" ? "console" : null, `[main console.${type}] ${plain}`, entry, null);
     },
     stop() {
       for (const [event, listener] of events) (context.off as Listen).call(context, event, listener);

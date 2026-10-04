@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { UsageError } from "./errors.ts";
 import { BESIDE_ACTION } from "./steps/args.ts";
+import { codeSteps } from "./steps/code.ts";
 import { builtinActions, STEP_NAMES } from "./steps/index.ts";
 import { nearest } from "./util.ts";
 import type { Step } from "./types.ts";
@@ -23,7 +24,7 @@ const BASES = new WeakMap<Step, string>();
 export const stepBase = (step: Step): string | undefined => BASES.get(step);
 
 // Steps whose values are code, where `${...}` may be the code's own.
-const CODE_STEPS = new Set(["js", "css", "playwright", "cdp", "electron"]);
+const CODE_STEPS = new Set(Object.keys(codeSteps));
 
 /** A copy of a step with more beside its action, still knowing where it was written. */
 export function withDefaults(step: Step, extra: Step): Step {

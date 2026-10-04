@@ -16,8 +16,6 @@ import { alive, allListeners, cwdOf, groupMembers, groupOf, killGroup, killProce
 import { acquireLock, clearRecord, fileName, readRecord, recordNames, writeRecord } from "./state.ts";
 import type { App } from "./types.ts";
 
-const withoutRunAsNode = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([key]) => key !== "ELECTRON_RUN_AS_NODE"));
-
 /** A server weblab started, recorded under its address so every weblab process sees it. */
 type ServerState = {
   pgid: number;
@@ -368,10 +366,8 @@ async function startServer(app: App, command: string, wanted: string | null, opt
     shell: true,
     detached: true,
     stdio: ["ignore", out, out],
-    // Told where to answer, the way most dev servers read it. A weblab run
-    // from an Electron app (an editor) inherits ELECTRON_RUN_AS_NODE, which
-    // would start an Electron app this command launches as plain Node.
-    env: { ...withoutRunAsNode(process.env), ...(port === "" ? {} : { PORT: port }) },
+    // Told where to answer, the way most dev servers read it.
+    env: { ...process.env, ...(port === "" ? {} : { PORT: port }) },
   });
   closeSync(out);
   if (child.pid === undefined) throw new SetupError(`could not start: ${command}`);

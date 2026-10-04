@@ -121,8 +121,24 @@ function launchError(error: unknown, wanted: string): SetupError {
 const INTERNAL = /^(devtools|chrome|chrome-extension|chrome-untrusted|edge):/;
 
 /** `9222`, `localhost:9222`, or a full http:// or ws:// address. */
-const endpoint = (attach: string) =>
+export const endpoint = (attach: string) =>
   /^\d+$/.test(attach) ? `http://127.0.0.1:${attach}` : /^[a-z]+:\/\//.test(attach) ? attach : `http://${attach}`;
+
+/** The process of the browser a context is in (an Electron app's main process), or null if it won't say. */
+export async function browserProcess(context: BrowserContext): Promise<number | null> {
+  const browser = context.browser();
+  if (browser === null) return null;
+  const session = await browser.newBrowserCDPSession().catch(() => null);
+  if (session === null) return null;
+  try {
+    const { processInfo } = (await session.send("SystemInfo.getProcessInfo")) as { processInfo: { type: string; id: number }[] };
+    return processInfo.find((process) => process.type === "browser")?.id ?? null;
+  } catch {
+    return null;
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
 
 // A tab that comes from `mine`: one a step opened from it, or a popup
 // of it, or one of those of one of those.

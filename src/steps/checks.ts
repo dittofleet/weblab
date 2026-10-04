@@ -192,47 +192,18 @@ const EXPECTATIONS: Expectation[] = [
   ],
   [
     "js",
-    ({ page }, { js }) => {
-      let found: unknown;
-      // An expression that throws isn't true yet, and may be once the page has caught up; what it threw is said if it never is.
-      let threw: string | undefined;
-      return {
-        holds: async () => {
-          try {
-            found = await page.evaluate(js);
-            threw = undefined;
-          } catch (error) {
-            threw = briefError(error).replace(/^page\.evaluate: /, "");
-            return false;
-          }
-          return Boolean(found);
-        },
-        wanted: () => (threw === undefined ? `${short(js)} to be truthy, it was ${short(JSON.stringify(found) ?? String(found))}` : `${short(js)} to be truthy, but it threw: ${threw}`),
-      };
-    },
+    ({ page }, { js }) =>
+      truthyCheck(js, "", async () => {
+        const value = await page.evaluate(js);
+        return { value, truthy: Boolean(value) };
+      }),
   ],
   [
     "electron",
     (ctx, { electron: code }) => {
       if (typeof code !== "string") bad("expect", `{ "electron": "JavaScript that turns true in the main process" }`);
-      let found: unknown;
-      let threw: string | undefined;
-      return {
-        holds: async () => {
-          let truthy: boolean;
-          try {
-            // Truthy as the main process has it: NaN there is falsy, though it comes back as "NaN".
-            ({ value: found, truthy } = await ctx.mainProcess().evaluate(code, ctx.timeout));
-            threw = undefined;
-          } catch (error) {
-            if (error instanceof UsageError) throw error;
-            threw = briefError(error);
-            return false;
-          }
-          return truthy;
-        },
-        wanted: () => (threw === undefined ? `${short(code)} to be truthy in the main process, it was ${short(JSON.stringify(found) ?? String(found))}` : `${short(code)} to be truthy in the main process, but it threw: ${threw}`),
-      };
+      // Truthy as the main process has it: NaN there is falsy, though it comes back as "NaN".
+      return truthyCheck(code, " in the main process", () => ctx.mainProcess().evaluate(code, ctx.timeout));
     },
   ],
   [
@@ -280,6 +251,29 @@ const EXPECTATIONS: Expectation[] = [
     },
   ],
 ];
+
+// Code that should turn truthy where `evaluate` runs it. Code that
+// throws isn't true yet, and may be once the app has caught up; what it
+// threw is said if it never is. A mistake in it is refused at once.
+function truthyCheck(code: string, where: string, evaluate: () => Promise<{ value: unknown; truthy: boolean }>): ReturnType<ExpectationBuilder> {
+  let found: unknown;
+  let threw: string | undefined;
+  return {
+    holds: async () => {
+      try {
+        const { value, truthy } = await evaluate();
+        found = value;
+        threw = undefined;
+        return truthy;
+      } catch (error) {
+        if (error instanceof UsageError) throw error;
+        threw = briefError(error).replace(/^page\.evaluate: /, "");
+        return false;
+      }
+    },
+    wanted: () => `${short(code)} to be truthy${where}, ${threw === undefined ? `it was ${short(JSON.stringify(found) ?? String(found))}` : `but it threw: ${threw}`}`,
+  };
+}
 
 // `text` beside another way of naming an element is what that element
 // should contain; alone (or with only `exact`) it is text on the page.
