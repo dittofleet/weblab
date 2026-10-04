@@ -11,7 +11,7 @@
 import type { Locator } from "playwright-core";
 import { briefError } from "../errors.ts";
 import { INSTALL, watchReact } from "../react/watch.ts";
-import { placeText, type Made } from "../sources.ts";
+import { packageOfPath, placeText, type Made } from "../sources.ts";
 import { nearest } from "../util.ts";
 import type { Action, ActionContext } from "../types.ts";
 import { bad, isObject } from "./args.ts";
@@ -50,6 +50,33 @@ async function ready(ctx: ActionContext): Promise<void> {
   await ctx.page.evaluate(INSTALL);
   installed.set(ctx.page, ctx.loads());
 }
+
+// Where a bundler hides node_modules in its chunks, only the source maps say
+// which components are a library's, and from which package. Each kind of component
+// the page couldn't place is looked up once, before a step that tells them apart.
+async function classify(ctx: ActionContext): Promise<void> {
+  // A page may hold more kinds than the page hands over at once: asked until it has none left.
+  for (let round = 0; round < 20; round++) {
+    const unknown = await inPage<{ id: number; server?: string; file: string; line: number; column: number }[]>(ctx, "_unclassified");
+    if (unknown.length === 0) return;
+    const found = await Promise.all(
+      unknown.map(async ({ id, server, file, line, column }): Promise<[number, boolean, string | null, string?]> => {
+        const verdict = (library: boolean, from: string | null): [number, boolean, string | null, string?] => (server === undefined ? [id, library, from] : [id, library, from, server]);
+        const inModules = /[/\\]node_modules[/\\]/.test(file);
+        // The project's own file, by its address: no map to read.
+        if (!inModules && ctx.sources.local(file)) return verdict(false, null);
+        const source = await ctx.sources.origin({ file, line, column }).catch(() => null);
+        const from = source === null ? null : packageOfPath(source.file);
+        // Without a map, its address alone says: a library's when it is in node_modules.
+        return verdict(from !== null || inModules, from);
+      }),
+    );
+    await inPage(ctx, "_classify", [found]);
+  }
+}
+
+// The pages told they run a production build of React, by which load of each.
+const productionTold = new WeakMap<object, number>();
 
 /** What the page says of a call: its value, or that the step asked for what isn't there (with the names near it). */
 type Answer<T> = { value: T } | { refused: string; names: string[] };
@@ -262,6 +289,12 @@ export const reactSteps: Record<string, Action> = {
     };
     const which = (["prop", "hook", "state"] as const).filter((key) => given[key] !== undefined);
 
+    if (action !== "set") await classify(ctx);
+    // A production build says so once a page, before what it hands back can mislead.
+    if (productionTold.get(ctx.page) !== ctx.loads() && (await inPage<boolean>(ctx, "_production"))) {
+      productionTold.set(ctx.page, ctx.loads());
+      ctx.note("this page runs a production build of React: names are minified, there are no source locations, and nothing can be changed");
+    }
     switch (action) {
       case "tree": {
         const depth = given.depth === undefined ? null : Number(given.depth);

@@ -427,6 +427,8 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       ignore: recorder.ignore,
       // Scripts and their maps, read as the page would (its cookies), or from disk for the main process's.
       sources: sourceMapper(async (url) => {
+        // Code the page evaluated has no address to fetch: the debugger has it, in a Chromium browser.
+        if (!/^https?:/.test(url)) return browser.attached || otherEngine(settings.browser) === null ? evaluatedSource(ctx.page, url) : null;
         const response = await context.request.get(url, { timeout: 5000 }).catch(() => null);
         if (response?.ok()) return response.text();
         return ctx.page.evaluate((url) => fetch(url, { signal: AbortSignal.timeout(5000) }).then((answer) => (answer.ok ? answer.text() : null)), url).catch(() => null);
@@ -559,6 +561,46 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
 
 // Absolute, or relative to the file the step was written in, or the
 // session's project, or where weblab was started.
+/**
+ * The source of a script a page evaluated under a name of its own (a
+ * bundler's module, carrying its source map inside), as the debugger has it.
+ * The reads asked for together share one turn of the debugger, which is on
+ * only while they are answered.
+ */
+const reading = new WeakMap<Page, Promise<{ session: CDPSession; scripts: Map<string, string> } | null>>();
+async function evaluatedSource(page: Page, url: string): Promise<string | null> {
+  let open = reading.get(page);
+  if (open === undefined) {
+    open = (async () => {
+      const session = await page.context().newCDPSession(page).catch(() => null);
+      if (session === null) return null;
+      const scripts = new Map<string, string>();
+      session.on("Debugger.scriptParsed", (script) => {
+        if (script.url) scripts.set(script.url, script.scriptId);
+      });
+      // Enabling it tells of every script already parsed.
+      await session.send("Debugger.enable").catch(() => {});
+      return { session, scripts };
+    })();
+    reading.set(page, open);
+    // Let go once this turn's reads are in.
+    void open.then((turn) =>
+      setTimeout(() => {
+        reading.delete(page);
+        void turn?.session.send("Debugger.disable").catch(() => {});
+        void turn?.session.detach().catch(() => {});
+      }, 1000),
+    );
+  }
+  const turn = await open;
+  const scriptId = turn?.scripts.get(url);
+  if (turn === null || scriptId === undefined) return null;
+  return turn.session
+    .send("Debugger.getScriptSource", { scriptId })
+    .then((answer) => answer.scriptSource)
+    .catch(() => null);
+}
+
 async function resolveFile(file: string, app: App): Promise<string> {
   const now = running.getStore();
   const base = now === undefined ? undefined : bases.get(now);

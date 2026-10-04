@@ -240,7 +240,10 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       if (matches.length > 0) throw refuse(`there ${matches.length === 1 ? "is one" : `are ${matches.length}`} ${target}, so no nth ${nth} (nth counts from 0)`);
       const names = new Set<string>();
       for (const [fiber] of walk()) if (COMPOSITE.has(fiber.tag)) names.add(nameOf(fiber));
-      throw Object.assign(refuse(`no component named ${target} is on the page`), { names: [...names] });
+      if (serverNames().has(String(target))) {
+        throw refuse(`${target} is a server component: it rendered on the server, so the page holds only what it rendered, not it. { "react": "tree" } shows it, and the components it rendered`);
+      }
+      throw Object.assign(refuse(`no component named ${target} is on the page`), { names: [...names, ...serverNames()] });
     }
     return matches[nth];
   };
@@ -413,6 +416,22 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     if (hook === undefined) throw refuse(`${nameOf(fiber)} has no hook ${number} (inspect it for its hooks)`);
     return hook;
   };
+  // The provider of a context nearest above a fiber, if there is one.
+  const providerOf = (context: unknown, fiber: Fiber): Fiber | null => {
+    for (let at = fiber.return; at; at = at.return) if (at.tag === PROVIDER && (at.type === context || at.type?._context === context)) return at;
+    return null;
+  };
+  // What a context holds for a fiber: its provider's value, or the context's default with none above.
+  const providedValue = (context: any, fiber: Fiber) => {
+    const provider = providerOf(context, fiber);
+    return provider ? provider.memoizedProps?.value : context?._defaultValue ?? context?._currentValue;
+  };
+  // What a fiber read of a context: kept with the read from React 18 on, else its provider's value.
+  const readValue = (read: any, fiber: Fiber) => ("memoizedValue" in read ? read.memoizedValue : providedValue(read.context, fiber));
+  const providerChanged = (context: unknown, fiber: Fiber) => {
+    const provider = providerOf(context, fiber);
+    return provider?.alternate ? !Object.is(provider.memoizedProps?.value, provider.alternate.memoizedProps?.value) : false;
+  };
   const contextsOf = (fiber: Fiber, skip: Set<unknown> = new Set()): [string, string][] => {
     const read: [string, string][] = [];
     // Read once per useContext call: each context is listed once.
@@ -420,7 +439,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     for (let at = fiber.dependencies?.firstContext ?? fiber.contextDependencies?.first; at; at = at.next) {
       if (seen.has(at.context) || skip.has(at.context)) continue;
       seen.add(at.context);
-      read.push([contextName(at.context, fiber), preview(at.memoizedValue)]);
+      read.push([contextName(at.context, fiber), preview(readValue(at, fiber))]);
     }
     return read;
   };
@@ -450,7 +469,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
   // ---- the app's own components, and those from node_modules
 
   const REACT_OWN = new RegExp(reactOwn);
-  const FRAME_FILE = /(?:\(|@|at )((?:https?|file|webpack-internal|webpack|rsc):\/\/\S+?):\d+:\d+\)?$/;
+  const FRAME_FILE = /(?:\(|@|at )([a-z][\w+.-]*:\/\/\S+?|\/[^\s()]+?):\d+:\d+\)?$/i;
   // The file a component's code is in, as the page's own code names it.
   const fileOf = (made: ReturnType<typeof madeAt>): string | null => {
     if (made === null) return null;
@@ -462,16 +481,13 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     return null;
   };
   const LIBRARY_FILE = /[/\\]node_modules[/\\]/;
-  // The package a file in node_modules is from: "@tanstack/react-query", from vite's "@tanstack_react-query.js" too.
+  // The package a file in node_modules is from: "@tanstack/react-query". A tool's own folder there
+  // (one whose name starts with a dot, holding what it prepared) doesn't say, and its source map does.
   const packageOf = (file: string): string | null => {
     const at = file.lastIndexOf("node_modules/");
     if (at === -1) return null;
-    const rest = file.slice(at + "node_modules/".length).split(/[?#]/)[0] as string;
-    if (rest.startsWith(".vite/deps/")) {
-      const name = rest.slice(".vite/deps/".length).replace(/\.m?js$/, "");
-      return name.startsWith("chunk-") ? null : name.startsWith("@") ? name.replace("_", "/") : name;
-    }
-    const parts = rest.split("/");
+    const parts = (file.slice(at + "node_modules/".length).split(/[?#]/)[0] as string).split("/");
+    if (parts[0]?.startsWith(".")) return null;
     return (parts[0]?.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]) || null;
   };
   /** The file a component's code is in: from its own frame, else from where it made its first element. */
@@ -480,45 +496,73 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
   // stack's frame is the component's own (its name on it). A component
   // that hands on an element made elsewhere (a Slot cloning its child)
   // carries that element's stack, so only then is it called again to see.
-  const fileOfFiber = (fiber: Fiber): string | null => {
+  const frameOfFiber = (fiber: Fiber): string | null => {
     const key = typeKey(fiber);
-    if (key !== null && files.has(key)) return files.get(key) as string | null;
+    if (key !== null && frames.has(key)) return frames.get(key) as string | null;
     const made = definedAt(fiber);
-    let file = typeof made === "string" ? ownFile(made, typeName(fiber.type)) : null;
-    if (file === null) {
-      const own = probe(fiber).frame;
-      file = (own === null ? null : fileOf(own)) ?? fileOf(made);
-    }
-    if (key !== null) files.set(key, file);
-    return file;
+    let frame = typeof made === "string" ? ownFrame(made, typeName(fiber.type)) : null;
+    if (frame === null) frame = probe(fiber).frame;
+    if (frame === null && made !== null) frame = typeof made === "string" ? firstFrame(made) : `at ${typeName(fiber.type)} (${made.fileName}:${made.lineNumber}:${made.columnNumber ?? 1})`;
+    if (key !== null) frames.set(key, frame);
+    return frame;
   };
-  // The file of a stack's first frame past React's, when that frame is the named function's.
-  const ownFile = (stack: string, name: string): string | null => {
-    for (const line of stack.split("\n")) {
-      const file = FRAME_FILE.exec(line.trim())?.[1];
-      if (!file || REACT_OWN.test(file)) continue;
-      return frameName(line) === name ? file : null;
-    }
-    return null;
+  const fileOfFiber = (fiber: Fiber): string | null => fileOf(frameOfFiber(fiber));
+  // A stack's first frame past React's: the named function's own, or (firstFrame) whoever's it is.
+  const firstFrame = (stack: string): string | null => stack.split("\n").find((line) => {
+    const file = FRAME_FILE.exec(line.trim())?.[1];
+    return file !== undefined && !REACT_OWN.test(file);
+  }) ?? null;
+  const ownFrame = (stack: string, name: string): string | null => {
+    const frame = firstFrame(stack);
+    return frame !== null && frameName(frame) === name ? frame : null;
   };
   /** The package a component from node_modules comes from, when it can be told. */
   const packageOfFiber = (fiber: Fiber): string | null => {
+    const key = typeKey(fiber);
+    const told = key === null ? undefined : verdicts.get(key);
+    if (told !== undefined) return told.from;
     const file = fileOfFiber(fiber);
     return file === null ? null : packageOf(file);
   };
-  // The file each component's code was found in, kept: a component calls back the same
+  // The frame each component's code was found at, kept: a component calls back the same
   // way only while it renders the same way (a boundary showing its error doesn't).
-  const files = new WeakMap<object, string | null>();
+  const frames = new WeakMap<object, string | null>();
+  // What weblab worked out from a component's source map, where its address can't say
+  // (a bundler's chunk): whether it is a library's, and whose.
+  const verdicts = new WeakMap<object, { library: boolean; from: string | null }>();
+  const typeIds = new Map<number, WeakRef<object>>();
+  const typeIdOf = new WeakMap<object, number>();
+  const asked = new WeakSet<object>();
+  // A root rendered by a production build of React, on a page whose own React is a
+  // development build, is tooling's (a framework's dev overlay, an extension), not the app's.
+  let toolingRoots = { renderers: -1, roots: new WeakMap<object, boolean>() };
+  const toolingRoot = (root: any): boolean => {
+    if (!root || typeof root !== "object") return false;
+    if (toolingRoots.renderers !== renderers.size) toolingRoots = { renderers: renderers.size, roots: new WeakMap() };
+    let answer = toolingRoots.roots.get(root);
+    if (answer === undefined) {
+      const renderer = renderers.get(rootRenderer.get(root) as number);
+      answer = renderer?.bundleType === 0 && [...renderers.values()].some((one) => one.bundleType === 1);
+      toolingRoots.roots.set(root, answer);
+    }
+    return answer;
+  };
   /** True for a component from node_modules. A provider or boundary goes with the component that rendered it. */
   const fromLibrary = (fiber: Fiber): boolean => {
+    if (toolingRoot(topOf(fiber).stateNode)) return true;
     if (!COMPOSITE.has(fiber.tag)) {
       const owner = ownerOf(fiber);
       return owner?.tag !== undefined && COMPOSITE.has(owner.tag) ? fromLibrary(owner) : false;
     }
+    const key = typeKey(fiber);
+    const told = key === null ? undefined : verdicts.get(key);
+    if (told !== undefined) return told.library;
     // Nothing of its own to tell by: counted as the app's.
     const file = fileOfFiber(fiber);
     return file !== null && LIBRARY_FILE.test(file);
   };
+  // The address, line and column of a frame.
+  const FRAME_PLACE = /([a-z][\w+.-]*:\/\/\S+?|\/[^\s()]+?):(\d+):(\d+)\)?$/i;
 
   // ---- custom hooks: which of a component's own hooks each of React's is called in
   //
@@ -528,6 +572,8 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
   // those stacks between React's hook and the component are its custom hooks.
 
   const PRIMITIVES = new Set(["use", "useActionState", "useCallback", "useContext", "useDebugValue", "useDeferredValue", "useEffect", "useEffectEvent", "useFormState", "useFormStatus", "useId", "useImperativeHandle", "useInsertionEffect", "useLayoutEffect", "useMemo", "useMemoCache", "useOptimistic", "useReducer", "useRef", "useState", "useSyncExternalStore", "useTransition", "useCacheRefresh", "readContext", "useHostTransitionStatus"]);
+  // React's own hook, by its name, as a bundler may have renamed it to keep names apart (useState2, useState$1).
+  const primitive = (name: string) => PRIMITIVES.has(name) || PRIMITIVES.has(name.replace(/\$?\d+$/, ""));
   const frameName = (line: string): string | null => {
     const name = /^\s*at (?:async )?(?:new )?([^\s(]+)/.exec(line)?.[1] ?? (line.includes("@") ? line.slice(0, line.indexOf("@")) : null);
     if (name === null || name === undefined) return null;
@@ -556,6 +602,13 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     const slots = slotsOf(fiber);
     let slot = 0;
     const next = () => slots[slot++]?.memoizedState;
+    // The real setter of the slot about to be read: whatever the component keeps from this
+    // call (a handler on a global, say) has to keep working after it.
+    // While weblab calls it, a setter does nothing, as the call must not change the app.
+    // Kept and called later, it is React's own.
+    let replaying = true;
+    const later = (real: unknown) => (typeof real === "function" ? (...args: unknown[]) => (replaying ? undefined : real(...args)) : noop);
+    const dispatchOf = () => later(slots[slot]?.queue?.dispatch);
     const calls: { takes: number; stack: string; context?: unknown }[] = [];
     let firstStack: string | null = null;
     const note = (takes: number, context?: unknown) => {
@@ -565,8 +618,8 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     };
     // What the component read of a context in its last render, else what the context holds outside one.
     const contextValue = (context: any) => {
-      for (let at = fiber.dependencies?.firstContext ?? fiber.contextDependencies?.first; at; at = at.next) if (at.context === context) return at.memoizedValue;
-      return context?._currentValue;
+      for (let at = fiber.dependencies?.firstContext ?? fiber.contextDependencies?.first; at; at = at.next) if (at.context === context) return readValue(at, fiber);
+      return providedValue(context, fiber);
     };
     const noop = () => {};
     const STOP = {};
@@ -585,8 +638,16 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
         }
         return contextValue(usable);
       },
-      useState: () => (note(1), [next(), noop]),
-      useReducer: () => (note(1), [next(), noop]),
+      useState: () => {
+        note(1);
+        const dispatch = dispatchOf();
+        return [next(), dispatch];
+      },
+      useReducer: () => {
+        note(1);
+        const dispatch = dispatchOf();
+        return [next(), dispatch];
+      },
       useRef: () => (note(1), next()),
       useMemo: () => (note(1), (next() as any)?.[0]),
       useCallback: () => (note(1), (next() as any)?.[0]),
@@ -600,8 +661,9 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       useTransition: () => {
         note(2);
         const pending = next();
-        next();
-        return [pending, noop];
+        // Its second slot holds the start function itself.
+        const start = next();
+        return [pending, later(start)];
       },
       useSyncExternalStore: () => {
         note(2);
@@ -609,13 +671,18 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
         next();
         return value;
       },
-      useOptimistic: () => (note(1), [next(), noop]),
+      useOptimistic: () => {
+        note(1);
+        const dispatch = dispatchOf();
+        return [next(), dispatch];
+      },
       useActionState: () => {
         note(3);
         const state = next();
         next();
+        const dispatch = dispatchOf();
         next();
-        return [state, noop, false];
+        return [state, dispatch, false];
       },
       useEffectEvent: () => (note(1), next(), noop),
       useCacheRefresh: () => (note(1), next(), noop),
@@ -659,6 +726,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       // Stopped partway (a promise not yet resolved, or the code needing what a real render has): what was noted stands.
       if (ref === null) firstStack ??= typeof error?.stack === "string" ? error.stack : null;
     } finally {
+      replaying = false;
       if (ref !== null && field !== null) ref[field] = before;
       (Error as any).stackTraceLimit = limit;
       quiet.forEach((level, i) => (console[level] = kept[i] as any));
@@ -683,7 +751,7 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       const at = frames.findIndex((frame) => frame.name === "weblabRendersComponent");
       // Between React's hook and the component: the custom hooks, innermost first.
       // weblab's own frames (this script has no address) and React's are not the app's.
-      const between = at < 1 ? [] : frames.slice(0, at - 1).filter((frame) => frame.line.includes("://") && !PRIMITIVES.has(frame.name) && !REACT_OWN.test(frame.line));
+      const between = at < 1 ? [] : frames.slice(0, at - 1).filter((frame) => frame.line.includes("://") && !primitive(frame.name) && !REACT_OWN.test(frame.line));
       const hooks = between.filter((frame) => /^use[A-Z0-9]/.test(frame.name));
       for (const hook of hooks) if (LIBRARY_FILE.test(hook.line)) libraryHooks.add(hook.name);
       if (call.takes === 0) {
@@ -805,7 +873,9 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     }
     const contexts = new Map<unknown, string>();
     for (let a = prev.dependencies?.firstContext, b = next.dependencies?.firstContext; a && b; a = a.next, b = b.next) {
-      if (!Object.is(a.memoizedValue, b.memoizedValue)) contexts.set(b.context, contextName(b.context, next));
+      // Before React 18 a read isn't kept: its provider's value against what the provider had before says.
+      const changed = "memoizedValue" in b ? !Object.is(a.memoizedValue, b.memoizedValue) : providerChanged(b.context, next);
+      if (changed) contexts.set(b.context, contextName(b.context, next));
     }
     if (contexts.size > 0) reasons.push(`context changed: ${[...contexts.values()].join(", ")}`);
     if (reasons.length === 0) {
@@ -943,6 +1013,10 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     if (renderers.size === 0) {
       throw new Error(`React loaded before weblab's hook was in the page, so it can't be changed from here. Reload the page, and weblab's hook goes in before React from then on`);
     }
+    if (renderer && typeof renderer.overrideProps === "function") {
+      const version = renderer.reconcilerVersion ?? renderer.version ?? "this version";
+      throw new Error(`React ${version} can't do this from outside (React 18 and later can)`);
+    }
     throw new Error(`this React can't be changed from outside: it is a production build (a development build can)`);
   };
   const notOnPage = () => {
@@ -957,14 +1031,59 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
     if (fiber.key != null) bits.push(`key=${JSON.stringify(fiber.key)}`);
     if (fiber.tag === PROVIDER) bits.push(`value=${preview(fiber.memoizedProps?.value, 0)}`);
     else if (fiber.tag === SUSPENSE && fiber.memoizedState !== null) bits.push("(showing its fallback)");
-    else {
-      for (const [key, value] of Object.entries(fiber.memoizedProps ?? {})) {
-        if (key === "children" || bits.length >= 5) continue;
-        if (typeof value === "string") bits.push(`${key}=${kept(key, value, () => JSON.stringify(value.length > 24 ? `${value.slice(0, 24)}…` : value))}`);
-        else if (typeof value === "number" || typeof value === "boolean") bits.push(`${key}=${value}`);
-      }
-    }
+    else bits.push(...propBits(fiber.memoizedProps));
     return bits.length > 0 ? ` ${bits.join(" ")}` : "";
+  };
+  const propBits = (props: any): string[] => {
+    const bits: string[] = [];
+    for (const [key, value] of Object.entries(props ?? {})) {
+      if (key === "children" || bits.length >= 5) continue;
+      if (typeof value === "string") bits.push(`${key}=${kept(key, value, () => JSON.stringify(value.length > 24 ? `${value.slice(0, 24)}…` : value))}`);
+      else if (typeof value === "number" || typeof value === "boolean") bits.push(`${key}=${value}`);
+    }
+    return bits;
+  };
+
+  // ---- server components
+  //
+  // A server component runs on the server, so the page has no fiber of it,
+  // only what it rendered. React's development build notes it on those
+  // fibers (_debugInfo): its name, props, owner and stack.
+  type ServerInfo = { name: string; env?: string; key?: string | null; props?: any; owner?: ServerInfo | null; debugStack?: any; stack?: any };
+  const serverInfos = (fiber: Fiber): ServerInfo[] => (fiber._debugInfo ?? []).filter((info: any) => info && typeof info.name === "string" && info.env !== undefined);
+  const serverNames = () => {
+    const names = new Set<string>();
+    for (const [fiber] of walk()) for (const info of serverInfos(fiber)) names.add(info.name);
+    return names;
+  };
+  const serverStack = (info: ServerInfo): string => String(info.debugStack?.stack ?? info.debugStack ?? info.stack ?? "");
+  // A server component's own stack is where it was made, in its owner's code. Its
+  // own code is where it made what it rendered: the stack of an element it owns,
+  // a server component's or a client one's, at a frame with its name.
+  // Gathered in one walk, until React commits again: each server component's frame in its own code.
+  let serverIndex: { frames: Map<ServerInfo, string>; commits: number; at: number } | null = null;
+  const serverCodeFrame = (info: ServerInfo): string | null => {
+    if (!fresh(serverIndex)) {
+      const frames = new Map<ServerInfo, string>();
+      const consider = (owner: unknown, stack: unknown) => {
+        if (!owner || typeof owner !== "object" || "tag" in owner || frames.has(owner as ServerInfo) || typeof stack !== "string") return;
+        const first = firstFrame(stack);
+        if (first !== null && frameName(first) === (owner as ServerInfo).name) frames.set(owner as ServerInfo, first);
+      };
+      for (const [fiber] of walk()) {
+        consider(fiber._debugOwner, fiber._debugStack?.stack ?? fiber._debugStack);
+        for (const inner of serverInfos(fiber)) consider(inner.owner, serverStack(inner));
+      }
+      serverIndex = { frames, commits, at: performance.now() };
+    }
+    return (serverIndex as { frames: Map<ServerInfo, string> }).frames.get(info) ?? null;
+  };
+  // Whether a server component is a library's, by the file its code is in, as weblab looked it up.
+  const serverVerdicts = new Map<string, { library: boolean; from: string | null }>();
+  const serverAsked = new Set<string>();
+  const serverVerdict = (info: ServerInfo) => {
+    const place = FRAME_PLACE.exec((serverCodeFrame(info) ?? "").trim());
+    return place ? serverVerdicts.get(place[1] as string) : undefined;
   };
   const shown = (fiber: Fiber) => COMPOSITE.has(fiber.tag) || fiber.tag === SUSPENSE || fiber.tag === PROVIDER || fiber.tag === ACTIVITY;
 
@@ -1076,6 +1195,63 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
         return { refused: String(error.message), names: (error.names as string[] | undefined) ?? [] };
       }
     },
+    /** True when every React on the page is a production build: names minified, no source locations, nothing to change. */
+    _production() {
+      return renderers.size > 0 && [...renderers.values()].every((one) => one.bundleType === 0);
+    },
+    /** Kinds of component on the page whose code's address doesn't say whose they are, with where their code is, for weblab to look up. */
+    _unclassified() {
+      const out: { id: number; file: string; line: number; column: number }[] = [];
+      for (const [fiber] of walk()) {
+        if (!COMPOSITE.has(fiber.tag) || out.length >= 500) continue;
+        const key = typeKey(fiber);
+        if (key === null || verdicts.has(key) || asked.has(key)) continue;
+        asked.add(key);
+        const place = FRAME_PLACE.exec((frameOfFiber(fiber) ?? "").trim());
+        if (!place) continue;
+        // In node_modules by its address: a library's, and only its package left to look up, when the address doesn't say.
+        if (LIBRARY_FILE.test(place[1] as string)) {
+          const from = packageOf(place[1] as string);
+          verdicts.set(key, { library: true, from });
+          if (from !== null) continue;
+        }
+        let id = typeIdOf.get(key);
+        if (id === undefined) {
+          id = typeIds.size + 1;
+          typeIds.set(id, new WeakRef(key));
+          typeIdOf.set(key, id);
+        }
+        out.push({ id, file: place[1] as string, line: Number(place[2]), column: Number(place[3]) });
+      }
+      for (const [fiber] of walk()) {
+        for (const info of serverInfos(fiber)) {
+          if (out.length >= 500) break;
+          const place = FRAME_PLACE.exec((serverCodeFrame(info) ?? "").trim());
+          const file = place?.[1] as string | undefined;
+          if (!place || file === undefined || serverVerdicts.has(file) || serverAsked.has(file)) continue;
+          serverAsked.add(file);
+          // In node_modules by its address: a library's, as a client component is.
+          if (LIBRARY_FILE.test(file)) {
+            const from = packageOf(file);
+            serverVerdicts.set(file, { library: true, from });
+            if (from !== null) continue;
+          }
+          out.push({ id: -serverAsked.size, server: file, file, line: Number(place[2]), column: Number(place[3]) } as any);
+        }
+      }
+      return out;
+    },
+    /** What weblab found in the source maps: for each kind, whether it is a library's, and which package. */
+    _classify(found: [number, boolean, string | null][]) {
+      for (const [id, library, from, server] of found as [number, boolean, string | null, string?][]) {
+        if (server !== undefined) {
+          serverVerdicts.set(server, { library, from });
+          continue;
+        }
+        const key = typeIds.get(id)?.deref();
+        if (key) verdicts.set(key, { library, from });
+      }
+    },
     _resolve(target: unknown, nth = 0) {
       return `c${idOf(resolve(target, nth))}`;
     },
@@ -1115,15 +1291,46 @@ export const reactInPage = ({ early, reactOwn }: { early: boolean; reactOwn: str
       const lines: string[] = [];
       let more = 0;
       let hidden = 0;
-      const starts = under === null ? allRoots().map((root) => root.current) : [resolve(under)];
+      // A tooling root is left out whole, unless libraries are asked for.
+      const shownRoots = allRoots().filter((root) => {
+        if (library || !toolingRoot(root)) return true;
+        if (under === null) for (const [fiber] of walk(root.current)) if (shown(fiber)) hidden += 1;
+        return false;
+      });
+      const starts = under === null ? shownRoots.map((root) => root.current) : [resolve(under)];
       for (const start of starts) {
         if (under === null) lines.push(`- root ${describeNode(start.stateNode?.containerInfo)}`);
         // How deep among the components shown each fiber is: under the
         // root line from 1, or from 0 for a component asked for.
         const levels = new Map<Fiber, number>();
+        const servers = new Map<ServerInfo, number>();
         const base = under === null ? 0 : -1;
         for (const [fiber, parent] of walk(start)) {
-          const above = parent === null ? base : (levels.get(parent) as number);
+          let above = parent === null ? base : (levels.get(parent) as number);
+          // The server components that rendered this, each once, under the one that rendered it.
+          // A tree asked for from a component starts at it, not at the server components above it.
+          for (const info of fiber === start && under !== null ? [] : serverInfos(fiber)) {
+            const placed = servers.get(info);
+            if (placed !== undefined) {
+              above = placed;
+              continue;
+            }
+            if (serverVerdict(info)?.library && !library) {
+              // Counted once, and what it rendered shown where it would have been.
+              servers.set(info, above);
+              hidden += 1;
+              continue;
+            }
+            const level = info.owner && servers.has(info.owner) ? (servers.get(info.owner) as number) + 1 : above + 1;
+            servers.set(info, level);
+            above = level;
+            if (depth !== null && level > depth) continue;
+            if (lines.length >= limit) more += 1;
+            else lines.push(`${"  ".repeat(level)}- ${info.name} (server)${info.key != null ? ` key=${JSON.stringify(info.key)}` : ""}${(() => {
+              const bits = propBits(info.props);
+              return bits.length > 0 ? ` ${bits.join(" ")}` : "";
+            })()}`);
+          }
           // Components from node_modules are left out unless asked for, and what they render is shown under the nearest shown above.
           const hide = shown(fiber) && !library && fiber !== start && fromLibrary(fiber);
           if (hide) hidden += 1;
