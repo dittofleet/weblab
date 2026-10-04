@@ -114,7 +114,7 @@ async function compare(ctx: ActionContext, shot: string, { file: before, png }: 
 const EXTENSIONS: Record<LookFormat, string> = { refs: "yml", plain: "yml", text: "txt", html: "html" };
 
 export const captureSteps: Record<string, Action> = {
-  look: async (ctx, args) => {
+  look: Object.assign(async (ctx: ActionContext, args: unknown) => {
     const options = isObject(args) ? args : typeof args === "string" ? { as: args } : {};
     const format = (options.format ?? "refs") as LookFormat;
     if (!LOOK_FORMATS.includes(format)) bad("look", `a format of ${LOOK_FORMATS.join(", ")}`);
@@ -127,7 +127,7 @@ export const captureSteps: Record<string, Action> = {
       ctx.artifacts.addFile(path);
     }
     return text;
-  },
+  }, { prints: true }),
 
   shot: async (ctx, args) => {
     const { as, fullPage, animations, screen, matches, tolerance } = arg<{ as?: string; fullPage?: boolean; animations?: boolean; screen?: boolean | ScreenArea; matches?: string; tolerance?: number }>(args, "as", "shot");

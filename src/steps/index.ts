@@ -10,6 +10,7 @@ import { codeSteps } from "./code.ts";
 import { formSteps } from "./forms.ts";
 import { inputSteps } from "./input.ts";
 import { navigationSteps, READY_KEYS } from "./navigation.ts";
+import { REACT_KEYS, reactSteps } from "./react.ts";
 import { SESSION_KEYS, sessionSteps } from "./sessions.ts";
 import { TARGET_KEYS } from "./target.ts";
 import { BESIDE_ACTION } from "./args.ts";
@@ -22,6 +23,7 @@ export const STEP_GROUPS: [title: string, steps: Record<string, Action>][] = [
   ["Reading and capturing", captureSteps],
   ["Around the page", browserSteps],
   ["Code", codeSteps],
+  ["React", reactSteps],
   ["More than one session", sessionSteps],
 ];
 
@@ -66,6 +68,7 @@ const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   playwright: { keys: ["code", "file"] },
   cdp: { keys: ["method", "params"] },
   electron: { keys: ["code", "file"] },
+  react: { keys: REACT_KEYS },
   new: { keys: SESSION_KEYS },
 };
 

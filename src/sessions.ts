@@ -16,6 +16,8 @@ import { withoutCursor } from "./cursor.ts";
 import { joinMainProcess, type MainProcess } from "./electron.ts";
 import { SetupError, StepFailure, stepError, UsageError } from "./errors.ts";
 import { filming } from "./film.ts";
+import { registerComponents, unwatchReact, usesReact, watchReact } from "./react/watch.ts";
+import { sourceMapper } from "./sources.ts";
 import { record, type Recorder } from "./recorder.ts";
 import { actionOf, checkTimeout, stepBase, stepOrigin } from "./script.ts";
 import { keepDisplayAwake, TRACK_PAGE_ON_SCREEN } from "./screen.ts";
@@ -214,7 +216,7 @@ const IDENTITY = ["storageState", "httpCredentials", "extraHTTPHeaders"];
 // it is driven, and where. Never who it is (a saved sign-in, a kept
 // profile), nor which running browser it joined.
 function inherited(parent: Driver): SessionOptions {
-  const { name: _name, attach: _attach, tab: _tab, newTab: _newTab, inspect: _inspect, persist: _persist, state: _state, path: _path, address: _address, context, ...rest } = parent.options;
+  const { name: _name, attach: _attach, tab: _tab, newTab: _newTab, mainProcess: _mainProcess, persist: _persist, state: _state, path: _path, address: _address, context, ...rest } = parent.options;
   return {
     ...rest,
     ...(context === undefined ? {} : { context: Object.fromEntries(Object.entries(context).filter(([key]) => !IDENTITY.includes(key))) }),
@@ -236,8 +238,8 @@ function checked(options: SessionOptions): SessionOptions {
   if (options.attach === undefined && (options.tab !== undefined || options.newTab)) {
     throw new UsageError("new: tab and newTab say what to drive in a running browser; they need attach");
   }
-  if (options.attach === undefined && options.inspect !== undefined) {
-    throw new UsageError("new: inspect joins the main process of an Electron app the session is attached to, so it needs attach, the app's Chromium debugging port");
+  if (options.attach === undefined && options.mainProcess !== undefined) {
+    throw new UsageError("new: mainProcess joins the main process of an Electron app the session is attached to, so it needs attach, the app's Chromium debugging port");
   }
   const launchOnly = (["browser", "browserArgs", "persist", "state", "context", "headed"] as const).filter((key) => options[key] !== undefined && options[key] !== false);
   if (options.attach !== undefined && launchOnly.length > 0) {
@@ -299,8 +301,9 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     ...(options.attach === undefined ? {} : { attach: String(options.attach) }),
     ...(options.tab === undefined ? {} : { tab: options.tab }),
     ...(options.newTab ? { newTab: true } : {}),
-    ...(options.inspect === undefined ? {} : { inspect: String(options.inspect) }),
+    ...(options.mainProcess === undefined ? {} : { mainProcess: String(options.mainProcess) }),
     ...(options.persist ? { persist: true } : {}),
+    ...(options.init === undefined ? {} : { init: [options.init].flat() }),
   };
   const app = resolveApp(options.dir, settings);
   const dir = options.out !== undefined ? artifactsDir(app.label, options.out) : (sharedDir ??= artifactsDir(app.label, undefined));
@@ -356,6 +359,13 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       settings: { ...settings.context, ...(state === undefined ? {} : { storageState: signInPath(app, state) }) },
     });
     undo.push(close);
+    // A browser or app weblab joined keeps running: what weblab put into its pages comes out first.
+    if (browser.attached) undo.push(() => unwatchReact(context));
+    // A React project's pages are watched from the first, and any other's from its first react step.
+    await registerComponents();
+    if (usesReact(app.root)) await watchReact(context);
+    // The session's own scripts, before any page's: what its pages expect to find already there.
+    for (const file of settings.init ?? []) await context.addInitScript({ path: await resolveFile(file, app) });
 
     const tracing = settings.trace ?? false;
     if (tracing) await context.tracing.start({ screenshots: true, snapshots: true });
@@ -379,13 +389,13 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     });
     undo.push(() => recorder.stop());
     // An Electron app's main process, when its debugger's port is given: joined now, so a wrong port is said at once.
-    const main: MainProcess | null = settings.inspect === undefined ? null : await joinMainProcess(settings.inspect, `${name}-${process.pid}-${times}`, recorder.fromMain);
+    const main: MainProcess | null = settings.mainProcess === undefined ? null : await joinMainProcess(settings.mainProcess, `${name}-${process.pid}-${times}`, recorder.fromMain);
     if (main !== null) {
       undo.push(() => main.close());
       // The two ports are one app's: its windows' browser process is its main process.
       const windows = await browserProcess(context);
       if (windows !== null && windows !== main.pid) {
-        throw new SetupError(`attach ${settings.attach} and inspect ${settings.inspect} are two different apps (processes ${windows} and ${main.pid}); give one app's two ports`);
+        throw new SetupError(`attach ${settings.attach} and mainProcess ${settings.mainProcess} are two different apps (processes ${windows} and ${main.pid}); give one app's two ports`);
       }
     }
     const film = filming(dir, files, say);
@@ -415,6 +425,12 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
       loads: () => recorder.loads(ctx.page),
       sinceLoad: () => recorder.sinceLoad(ctx.page),
       ignore: recorder.ignore,
+      // Scripts and their maps, read as the page would (its cookies), or from disk for the main process's.
+      sources: sourceMapper(async (url) => {
+        const response = await context.request.get(url, { timeout: 5000 }).catch(() => null);
+        if (response?.ok()) return response.text();
+        return ctx.page.evaluate((url) => fetch(url, { signal: AbortSignal.timeout(5000) }).then((answer) => (answer.ok ? answer.text() : null)), url).catch(() => null);
+      }, app.root),
       async cdp(method, params) {
         // One connection per tab, kept open: settings made over it (a slow
         // network, a throttled CPU) last only as long as it does.
@@ -428,7 +444,7 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
         return connection.send(method as never, params as never);
       },
       mainProcess() {
-        if (main === null) throw new UsageError("electron: this session has no main process to run code in. Open it with inspect, the port the app's --inspect gave it");
+        if (main === null) throw new UsageError("electron: this session has no main process to run code in. Open it with mainProcess, the port the app's --inspect gave it");
         return main;
       },
       async electron(code, arg) {

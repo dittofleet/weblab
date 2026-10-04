@@ -56,7 +56,7 @@ A [`new` step](steps.md#more-than-one-session) opens a session in the middle of 
 | The project (`dir`), where files go (`out`), and the address it is pointed at, or, for a session attached to a browser, the `http` or `https` site its page is on | `name` |
 | `start`, `startTimeout` and `ready` | `attach`, `tab`, `newTab` |
 | `browser`, `browserArgs` and `headed` | `state` and `persist`: a second session is a second user |
-| `viewport`, `timeout`, `ignore` and `trace` | `path`: it goes to `/` unless the step says |
+| `viewport`, `timeout`, `ignore`, `trace` and `init` | `path`: it goes to `/` unless the step says |
 | `context`, with the step's own keys laid over it | |
 
 A `new` step that gives `attach` takes nothing but the project and where files go.
@@ -136,7 +136,7 @@ Other weblab processes on the machine (another agent's, say) share servers the s
 
 `attach` joins a browser or app that is already running, over the remote debugging port it was started with, instead of launching one. That covers what a fresh browser can't:
 
-- **An Electron app.** Its windows are Chromium pages, so every step works on them, and `js` can call whatever the app puts on `window`. With `inspect`, code runs in its [main process](#the-main-process) too.
+- **An Electron app.** Its windows are Chromium pages, so every step works on them, and `js` can call whatever the app puts on `window`. With `mainProcess`, code runs in its [main process](#the-main-process) too.
 - **A browser that is already set up**, signed in to accounts a test needs, or with extensions.
 
 ### Starting it with a debugging port
@@ -160,7 +160,7 @@ weblab can also start the app itself, and stop it when the session ends. Give th
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
 ```
 
 If an app started by hand exits at once with `Cannot find module 'electron'`, it ran as plain Node. The shell has `ELECTRON_RUN_AS_NODE` set, which happens in a terminal opened from another Electron app, such as an editor. Put `env -u ELECTRON_RUN_AS_NODE` in front of the command. Commands weblab starts never get the variable.
@@ -213,7 +213,7 @@ Two windows of a desktop app, or two apps that talk to each other, are two sessi
 
 ### The main process
 
-An Electron app's main process owns its windows, menus, native dialogs and IPC, none of which a step in a window can reach. An app started with `--inspect` as well opens a Node debugger on a second port, and `inspect` joins it alongside the window:
+An Electron app's main process owns its windows, menus, native dialogs and IPC, none of which a step in a window can reach. An app started with `--inspect` as well opens a Node debugger on a second port, and `mainProcess` joins it alongside the window:
 
 ```sh
 /Applications/MyApp.app/Contents/MacOS/MyApp --remote-debugging-port=9222 --inspect=9229
@@ -222,7 +222,7 @@ An Electron app's main process owns its windows, menus, native dialogs and IPC, 
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "inspect": 9229 }
+{ "name": "app", "attach": 9222, "mainProcess": 9229 }
 ```
 
 ```text

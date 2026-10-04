@@ -1,6 +1,7 @@
 import type { BrowserContext, Locator, Page } from "playwright-core";
 import type { MainProcess } from "./electron.ts";
 import type { Film } from "./film.ts";
+import type { SourceMapper } from "./sources.ts";
 
 export type Viewport = {
   width: number;
@@ -49,9 +50,11 @@ export type Settings = {
   /** Drive a new tab in the attached browser, and leave its own alone. */
   newTab?: boolean;
   /** An attached Electron app's main process, for `electron` steps: the port or address its `--inspect` gave it. */
-  inspect?: string;
+  mainProcess?: string;
   /** Keep one browser profile for this project between sessions. */
   persist?: boolean;
+  /** Scripts run in every page before its own, as given (files, read relative to the project). */
+  init?: string[];
 };
 
 /** The project a session was opened from: where defaults come from, and where its server starts. */
@@ -122,11 +125,13 @@ export type ActionContext = {
   sinceLoad(): { logs: ConsoleEntry[]; responses: ResponseEntry[] };
   /** Leaves more console output and failed requests out, from now on. */
   ignore(patterns: string[]): void;
+  /** Places in the page's code (or the main process's), put back as places in the project's source through source maps. */
+  sources: SourceMapper;
   /** Sends a raw Chrome DevTools Protocol command to the current tab, over a connection kept open for it. */
   cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
   /**
    * Runs code in the attached Electron app's main process and hands back its value: statements
-   * whose last one's value it is, or a function given `electron` and `arg`. Needs `inspect`.
+   * whose last one's value it is, or a function given `electron` and `arg`. Needs `mainProcess`.
    */
   electron(code: string | ((electron: any, arg: any) => unknown), arg?: unknown): Promise<unknown>;
   /** The attached Electron app's main process, as `electron` and `expect` use it. A usage error if the session has none. */
@@ -173,7 +178,7 @@ export type SessionOptions = {
   attach?: string | number;
   tab?: string;
   newTab?: boolean;
-  inspect?: string | number;
+  mainProcess?: string | number;
   browser?: string;
   browserArgs?: string[];
   headed?: boolean;
@@ -186,6 +191,8 @@ export type SessionOptions = {
   timeout?: number;
   ignore?: string[];
   ready?: Ready;
+  /** A script file, or several, run in every page before the page's own scripts: a stub for what a page expects to find (an Electron preload's API). */
+  init?: string | string[];
   /** Where its screenshots, logs and videos go. */
   out?: string;
 };
@@ -204,6 +211,8 @@ export type SessionHandle = Pick<ActionContext, "name" | "locate" | "cdp" | "ele
 export type Action = ((ctx: ActionContext, args: any) => Promise<unknown>) & {
   /** The step takes no argument: `{ "back": true }`. */
   noArgs?: boolean;
+  /** What the step hands back is text to read, printed as it is rather than as JSON: a look, a react step. */
+  prints?: boolean;
 };
 
 export type StepResult = {

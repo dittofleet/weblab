@@ -524,6 +524,165 @@ test("params fill steps and files, code hands back values, and a shot is held to
   await lab.close();
 });
 
+// The React page, built as a dev server would build it: React's
+// development build, and a source map back to react/App.tsx.
+async function buildReactPage(): Promise<void> {
+  const built = await Bun.build({
+    entrypoints: [join(app, "react", "App.tsx")],
+    outdir: join(app, "react-dist"),
+    sourcemap: "linked",
+    define: { "process.env.NODE_ENV": '"development"' },
+    jsx: { development: true },
+  });
+  if (!built.success) throw new AggregateError(built.logs, "the React page didn't build");
+}
+
+test("react shows the components, where each is in the source, what rendered and why, and changes them", async () => {
+  await buildReactPage();
+  const lab = weblab();
+  assert.equal((await lab.tool("new", { ...BASE, path: "/react" })).failed, false);
+  const seen = await lab.tool("run", { steps: [{ expect: "products: Kettle, Lamp" }, { react: "tree" }, { react: { inspect: "Counter" } }, { react: { inspect: { text: "Socks" } } }] });
+  assert.equal(seen.failed, false, seen.text);
+  // The tree is the components, with what they were given, and the ids steps can name them by.
+  assert.match(seen.text, /- root <div#root>\n {2}- App \[c\d+\]\n {4}- ThemeContext\.Provider value="light" \[c\d+\]\n {6}- Header title="React fixture" apiKey=\[redacted\] \[c\d+\]\n {6}- Counter step=1 \[c\d+\]\n {6}- Status \[c\d+\]\n {6}- Cart \[c\d+\]\n {8}- CartItem key="sku-1" \[c\d+\]/);
+  assert.match(seen.text, / {6}- Suspense \[c\d+\]\n {8}- Products \[c\d+\]\n {6}- Boundary \[c\d+\]\n {8}- Checkout \[c\d+\]/);
+  // Where its code is (its function) and where it is used, through the source map, and its hooks by kind, in order.
+  const lineOf = (text: string) => readFileSync(join(app, "react", "App.tsx"), "utf8").split("\n").findIndex((line) => line.startsWith(text)) + 1;
+  assert.match(seen.text, new RegExp(`Counter \\[c\\d+\\] function\\nsource {3}react/App\\.tsx:${lineOf("function Counter(")}:\\d+\\n`));
+  assert.match(seen.text, /Counter \[c\d+\] function\nsource {3}react\/App\.tsx:\d+:\d+\nused at {2}react\/App\.tsx:\d+:\d+\nowners {3}App\nelements <button>/);
+  assert.match(seen.text, /hooks\n {2}0 {3}useState 0\n {2}1 {3}useMemo 0 {2}deps \[0\]\n {2}2 {3}useRef \{ current: <button> \}\n {2}3 {3}useEffect {2}deps \[0\]/);
+  // An element means the component that rendered it.
+  assert.match(seen.text, /CartItem \[c\d+\] memo\nkey {6}"sku-1"\nsource {3}react\/App\.tsx:\d+:\d+\nused at .*\nowners {3}Cart < App[\s\S]*props\n {2}item: \{ id: "sku-1", name: "Socks", qty: 2 \}/);
+
+  // What rendered since the last time asked, and why: a context, a parent, a hook.
+  const rendered = await lab.tool("run", { steps: [{ react: "renders" }, { click: "text=Theme light" }, { react: "renders" }, { click: "text=More socks" }, { react: "renders" }] });
+  assert.equal(rendered.failed, false, rendered.text);
+  assert.match(rendered.text, /ok {4}3 react[\s\S]*1 commit since the last time asked.*\n[\s\S]*App \[c\d+\] +1× +[<\d.]+ ms {2}state changed: hook 0 \(useState\) "light" → "dark"/);
+  assert.match(rendered.text, /Header \[c\d+\] +1× +[<\d.]+ ms {2}context changed: ThemeContext/);
+  assert.match(rendered.text, /Counter \[c\d+\] +1× +[<\d.]+ ms {2}parent rendered \(props equal\)/);
+  // A new element or object with the same contents is told apart from a real change.
+  assert.match(rendered.text, /Boundary \[c\d+\] +1× +[<\d.]+ ms {2}props new but equal: children/);
+  const third = rendered.text.slice(rendered.text.indexOf("ok    5 react"));
+  assert.match(third, /CartItem \[c\d+\] +1× +[<\d.]+ ms {2}props changed: item/);
+  // The memoized item that didn't change didn't render.
+  assert.equal(third.match(/CartItem/g)?.length, 1);
+
+  // A component as a target, by name or by id.
+  const id = /- Checkout \[(c\d+)\]/.exec(seen.text)?.[1];
+  const targets = await lab.tool("run", { steps: [{ expect: { component: "CartItem", nth: 1, text: "Hat" } }, { click: id }, { js: "weblab.react.find('CartItem').map((item) => item.props.item.name)" }] });
+  assert.equal(targets.failed, false, targets.text);
+  assert.match(targets.text, /\[\s+"Socks",\s+"Hat"\s+\]/);
+
+  // Its props and state changed, a fallback and an error state forced, and let go of.
+  const changed = await lab.tool("run", {
+    steps: [
+      { react: { set: "Counter", hook: 0, value: 41 } },
+      { expect: "count 41 (doubled 82)" },
+      { react: { set: "Header", prop: "title", value: "Retitled" } },
+      { expect: { role: "heading", name: "Retitled" } },
+      { react: { suspend: "Products" } },
+      { expect: "loading products" },
+      { react: { suspend: false } },
+      { expect: "products: Kettle, Lamp" },
+      { react: { error: "Checkout" } },
+      { expect: { role: "alert", text: "checkout broke" } },
+      { react: { error: false } },
+      { expect: { role: "button", name: "Pay" } },
+    ],
+  });
+  assert.equal(changed.failed, false, changed.text);
+  // What was forced is named, with the app's component around it.
+  assert.match(changed.text, /Suspense \[c\d+\] in App shows its fallback, until \{ "react": \{ "suspend": false \} \}/);
+  assert.match(changed.text, /Boundary \[c\d+\] in App shows its error state, until \{ "react": \{ "error": false \} \} or the app resets it/);
+  assert.match(changed.text, /hook 0 of Counter \[c\d+\] set to 41/);
+  assert.match(changed.text, /Boundary \[c\d+\] let go/);
+  // The boundary mounted what it holds again, so the Checkout from before is gone, and its id with it.
+  assert.match((await lab.tool("run", { steps: [{ react: { inspect: id } }] })).text, new RegExp(`FAIL {2}1 react: ${id} is not on the page now`));
+  // An element a wrapper renders says whose code wrote it.
+  const card = await lab.tool("run", { steps: [{ react: { inspect: { text: "inside a card" } } }] });
+  assert.match(card.text, /Card \[c\d+\] function[\s\S]*\nwritten  App \[c\d+\] wrote the <p>, at react\/App\.tsx:\d+:\d+, and Card renders it/);
+  // A context's value is its provider's prop. An option an action doesn't take is refused.
+  const themed = await lab.tool("run", { steps: [{ react: { set: "ThemeContext.Provider", prop: "value", value: "dark" } }, { expect: { js: "document.querySelector('h1').className === 'dark'" } }, { react: { inspect: "Cart", keep: true } }] });
+  assert.match(themed.text, /ok {4}2 expect/);
+  assert.match(themed.text, /FAIL {2}3 react: inspect has no option "keep" \(it takes nth, library, prop, hook, state\)/);
+
+  // A store's hook takes two of React's slots (its value, and the effect that subscribes): the numbers still line up, and only state can be set.
+  const store = await lab.tool("run", { steps: [{ react: { inspect: "Status" } }, { react: { set: "Status", hook: 1, value: "fine" } }, { expect: "online fine" }, { react: { set: "Status", hook: 0, value: false } }] });
+  assert.match(store.text, /hooks\n {2}0 {3}useSyncExternalStore true\n {2}1 {3}useState "ok"\n/);
+  assert.match(store.text, /FAIL {2}4 react: hook 0 of Status is a useSyncExternalStore, whose store decides its value/);
+
+  // A library's components (served from node_modules) are left out, and its hook is one line. library: true shows it all.
+  const library = await lab.tool("run", {
+    steps: [
+      { expect: "items success" },
+      { react: "tree" },
+      { react: { tree: "Items", library: true } },
+      { react: { inspect: "Items" } },
+      { react: { inspect: "Items", library: true } },
+      { react: { inspect: { text: "items success" } } },
+      { react: { inspect: "Compiled" } },
+      { react: { error: "FakeButton" } },
+      { expect: "fake boundary caught it" },
+      { react: { error: false } },
+    ],
+  });
+  assert.equal(library.failed, false, library.text);
+  const [whole, own] = [library.text.slice(library.text.indexOf("ok    2 react"), library.text.indexOf("ok    3 react")), library.text.slice(library.text.indexOf("ok    3 react"), library.text.indexOf("ok    4 react"))];
+  assert.match(whole, /- Items \[c\d+\]\n/);
+  assert.doesNotMatch(whole, /FakeButton|FakeBoundary/);
+  assert.match(whole, /\(\d+ components from node_modules left out, shown with "library": true\)/);
+  assert.match(own, /- Items \[c\d+\]\n {2}- FakeBoundary \[c\d+\]\n {4}- FakeButton \[c\d+\]/);
+  assert.match(library.text, /ok {4}4 react[\s\S]*?hooks\n {2}0-2 useFakeQuery \["items"\] → \{ status: "success", data: Array\(2\), error: null \}\n/);
+  assert.match(library.text, /ok {4}5 react[\s\S]*?hooks\n {2}useFakeQuery\n {4}0 {3}useState [^\n]+\n {4}1 {3}useEffect [^\n]+\n {4}2 {3}useSyncExternalStore \{ status: "success"/);
+  assert.match(library.text, /ok {4}6 react[\s\S]*?\nvia {6}FakeButton \[c\d+\] from fake-lib rendered the element \("library": true inspects it\)/);
+  assert.match(library.text, /Compiled \[c\d+\] function, compiled by React Compiler/);
+  assert.match(library.text, /FakeBoundary \[c\d+\] \(from fake-lib\) in Items shows its error state/);
+  // A compiled component is marked, and a state object says what changed inside it.
+  const marked = await lab.tool("run", { steps: [{ reload: true }, { expect: "items success" }, { react: "renders" }] });
+  assert.match(marked.text, /Compiled \[c\d+\] \(compiled\) +1×/);
+  assert.match(marked.text, /Items \[c\d+\] +2× +[<\d.]+ ms {2}1× mounted\n +1× state changed: hook 2 \(useFakeQuery\): status "pending" → "success", data/);
+
+  // Within one component, and kept for the next to read too.
+  const scoped = await lab.tool("run", { steps: [{ expect: "products: Kettle, Lamp" }, { react: "renders" }, { click: "text=More socks" }, { react: { renders: "Cart", keep: true } }, { react: { renders: "Counter" } }, { react: "renders" }] });
+  assert.match(scoped.text, /ok {4}4 react[^\n]*\n\n3 components within c\d+ rendered since the last time asked\n(?: {2}.*\n)*? {2}Cart \[/);
+  assert.match(scoped.text, /ok {4}5 react[^\n]*\n\nnothing within c\d+ rendered since the last time asked/);
+  // Asking about another component left the counts within Cart to the next ask.
+  assert.match(scoped.text, /ok {4}6 react[^\n]*\n\n1 commit since the last time asked.*\n(?: {2}.*\n)*? {2}Cart \[/);
+  // A value JSON can't hold, made in the page.
+  const made = await lab.tool("run", { steps: [{ react: { set: "Cart", hook: 0, js: "[{ id: 'sku-9', name: 'Kettle', qty: new Date(0).getUTCFullYear() }]" } }, { expect: "Kettle × 1970" }] });
+  assert.equal(made.failed, false, made.text);
+  // What a boundary caught is said, and its stack in the console is the source's.
+  const exploded = await lab.tool("run", { steps: [{ react: { set: "Checkout", prop: "explode", value: true } }] });
+  assert.match(exploded.text, /prop explode of Checkout was set, but rendering then threw: checkout exploded, and an error boundary caught it/);
+  assert.match(exploded.text, /at Checkout \(react\/App\.tsx:\d+:\d+\)/);
+  await lab.tool("run", { steps: [{ reload: true }] });
+
+  // A secret's value stays hidden, read whole or drilled into.
+  const secrets = await lab.tool("run", { steps: [{ react: { inspect: "Header" } }, { react: { inspect: "Header", prop: "apiKey" } }, { react: { inspect: "Counter", state: "count" } }] });
+  assert.doesNotMatch(secrets.text, /sk-fixture-secret/);
+  assert.match(secrets.text, /apiKey: \[redacted\]/);
+  assert.match(secrets.text, /prop apiKey \[redacted\]/);
+  assert.match(secrets.text, /FAIL {2}3 react: Counter is a function component, whose state is in its hooks: give hook/);
+  // What unmounted within a component is told when asked about it.
+  const removed = await lab.tool("run", { steps: [{ react: "renders" }, { click: "text=Remove hat" }, { react: { renders: "Cart" } }] });
+  assert.match(removed.text, /ok {4}3 react[\s\S]*\nunmounted: CartItem$/m);
+
+  // A name that isn't there says which is near, and an id from before says to look again.
+  const wrong = await lab.tool("run", { steps: [{ react: { inspect: "Countr" } }] });
+  assert.match(wrong.text, /FAIL {2}1 react: no component named Countr is on the page \(did you mean Counter\?\)/);
+  const gone = await lab.tool("run", { steps: [{ react: { inspect: "c999" } }] });
+  assert.match(gone.text, /FAIL {2}1 react: c999 is not on the page now/);
+  const plain = await lab.tool("run", { steps: [{ goto: "/other" }, { react: "tree" }] });
+  assert.match(plain.text, /FAIL {2}2 react: no React on this page/);
+
+  // A session's own script runs before each page's: a stub for what the page expects to find.
+  const stub = join(scratch, "stub.js");
+  writeFileSync(stub, "window.api = { platform: 'stubbed' };");
+  assert.equal((await lab.tool("new", { ...BASE, name: "stubbed", init: stub })).failed, false);
+  assert.match((await lab.tool("run", { session: "stubbed", steps: [{ reload: true }, { js: "window.api.platform" }] })).text, /"stubbed"/);
+  await lab.close();
+});
+
 test("a video is recorded from when it starts, with the app ready, until it stops or the session ends", async () => {
   const lab = weblab();
   const dir = out();
@@ -626,11 +785,11 @@ test("an Electron app's main process runs code beside its window, joined by its 
   const stranger = await mainProcess(other);
   try {
     const lab = weblab();
-    assert.match((await lab.tool("new", { name: "x", inspect: port })).text, /inspect joins the main process of an Electron app the session is attached to, so it needs attach/);
-    assert.match((await lab.tool("new", { name: "x", attach: window.port, inspect: window.port })).text, new RegExp(`${window.port} is the app's Chromium debugging port, which is for attach\\. inspect takes the main process's Node one`));
+    assert.match((await lab.tool("new", { name: "x", mainProcess: port })).text, /mainProcess joins the main process of an Electron app the session is attached to, so it needs attach/);
+    assert.match((await lab.tool("new", { name: "x", attach: window.port, mainProcess: window.port })).text, new RegExp(`${window.port} is the app's Chromium debugging port, which is for attach\\. mainProcess takes the main process's Node one`));
     // Two ports of two apps are refused: the window's process isn't the main process.
-    assert.match((await lab.tool("new", { name: "x", attach: window.port, inspect: other })).text, new RegExp(`attach ${window.port} and inspect ${other} are two different apps`));
-    const opened = await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    assert.match((await lab.tool("new", { name: "x", attach: window.port, mainProcess: other })).text, new RegExp(`attach ${window.port} and mainProcess ${other} are two different apps`));
+    const opened = await lab.tool("new", { name: "app", attach: window.port, mainProcess: port });
     assert.equal(opened.failed, false, opened.text);
     assert.match(opened.text, new RegExp(`^session app {2}attached to ${window.port}, main process at ${port}\n`));
     // One electron step on a session, and the reply.
@@ -674,17 +833,17 @@ test("an Electron app's main process runs code beside its window, joined by its 
     const stubbed = await lab.tool("run", { session: "app", steps: [{ electron: "const real = dialog.showMessageBox; stub(dialog, 'showMessageBox', async (options) => ({ response: 1, real: typeof real }))" }, { electron: "await dialog.showMessageBox({ message: 'Sure?' })" }] });
     assert.match(stubbed.text, /ok {4}1 electron \(\d+ms\)\nok {4}2 electron \(\d+ms\)\n\{\s*"response": 1,\s*"real": "function"\s*\}/);
     await lab.tool("end", { session: "app" });
-    await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    await lab.tool("new", { name: "app", attach: window.port, mainProcess: port });
     assert.match(await inMain("[(await dialog.showMessageBox({})).response, typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*0,\s*"undefined"\s*\]/);
 
     // Two sessions stubbing one thing can end in either order: the app ends up as it was.
     for (const [first, second, left] of [["app", "other", /"B"/], ["other", "app", /"A"/]] as const) {
-      await lab.tool("new", { name: "other", attach: window.port, inspect: port });
+      await lab.tool("new", { name: "other", attach: window.port, mainProcess: port });
       await lab.tool("run", { session: "app", steps: [{ electron: "stub(app, 'getName', () => 'A')" }, { electron: "stub(app, 'getName', () => 'B')", on: "other" }] });
       await lab.tool("end", { session: first });
       assert.match(await inMain("app.getName()", { session: second }), left);
       await lab.tool("end", { session: second });
-      await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+      await lab.tool("new", { name: "app", attach: window.port, mainProcess: port });
       assert.match(await inMain("[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*"fixture",\s*"undefined"\s*\]/);
     }
     // A promise the code ends with is awaited, and evaluations side by side keep their own values.
@@ -707,7 +866,7 @@ test("an Electron app's main process runs code beside its window, joined by its 
     assert.equal(warned.failed, false, warned.text);
     await inMain("const Base = class { hi() { return 'base' } }; globalThis.thing = new Base(); stub(thing, 'hi', () => 'stub'); thing.hi()");
     await lab.tool("end", { session: "app" });
-    await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    await lab.tool("new", { name: "app", attach: window.port, mainProcess: port });
     assert.match(await inMain("const own = Object.hasOwn(thing, 'hi'); const said = thing.hi(); delete globalThis.thing; [own, said]"), /\[\s*false,\s*"base"\s*\]/);
     // A SyntaxError the code throws as it runs isn't a mistake in it: a check keeps trying.
     const parsed = await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => app.json = '{\"done\": true}', 200); app.json = '{'; 1" }, { expect: { electron: "JSON.parse(app.json).done" } }] });
@@ -741,7 +900,7 @@ test("an Electron app's main process runs code beside its window, joined by its 
     assert.match(await inMain("app.getName()"), /the app's main process went away: it quit or restarted\. End the session and open it again/);
 
     await lab.tool("new", { name: "plain", attach: window.port });
-    assert.match(await inMain("1", { session: "plain" }), /this session has no main process to run code in\. Open it with inspect/);
+    assert.match(await inMain("1", { session: "plain" }), /this session has no main process to run code in\. Open it with mainProcess/);
     // So does one whose window went, in the middle of a step and after it, and list says so.
     const waiting = lab.tool("run", { session: "plain", steps: [{ wait: 5000 }] });
     await sleep(500);

@@ -33,6 +33,8 @@ This page covers the five steps that run code, and step files written as code. T
 
 A check can be any JavaScript too: `{ "expect": { "js": "window.app.ready === true" } }` waits until it is true, and if it never is, says what it was.
 
+In a React app, `weblab.react` reads its components from here: `{ "js": "weblab.react.find('CartItem').map(item => item.props.item.qty)" }`. See [weblab.react in code](steps.md#weblabreact-in-code).
+
 ## css: change how the page looks
 
 `run`
@@ -61,7 +63,7 @@ The stylesheet stays for the rest of the session, through reloads and in new tab
 | `locate(target, { all })` | A weblab [target](steps.md#targets) (a ref, a role, a label, a selector) as a Playwright locator: the first match, or every match with `{ all: true }`. |
 | `cdp(method, params)` | A raw CDP command, as the `cdp` step sends it. |
 | `electron(code, arg)` | Runs code in the app's main process, as the [`electron` step](#electron-the-apps-main-process) does. Given a function, calls it with the electron module and `arg`: `await electron(({ app }, name) => app.setName(name), "Test")`. |
-| `logs` | What the session's tabs have logged so far: `{ type, text, url }` entries, console messages and page errors, past what is ignored. With `inspect`, what the main process logged too, marked `process: "main"`. |
+| `logs` | What the session's tabs have logged so far: `{ type, text, url }` entries, console messages and page errors, past what is ignored. With `mainProcess`, what the main process logged too, marked `process: "main"`. |
 | `responses` | Every response so far: `{ status, method, url, mocked }`. |
 | `origin` | Where the app answers, for building URLs. |
 | `params` | The `params` given to `run`. |
@@ -116,7 +118,7 @@ The [protocol reference](https://chromedevtools.github.io/devtools-protocol/) li
 
 ## electron: the app's main process
 
-An Electron app runs each window's page in Chromium, and everything else in its main process: the windows themselves, menus, native dialogs, IPC and the file system. `electron` runs JavaScript in the main process. The session has to be [attached](sessions.md#running-browsers-and-electron-apps) to the app and opened with `inspect`, the port of the Node debugger the app starts with `--inspect`.
+An Electron app runs each window's page in Chromium, and everything else in its main process: the windows themselves, menus, native dialogs, IPC and the file system. `electron` runs JavaScript in the main process. The session has to be [attached](sessions.md#running-browsers-and-electron-apps) to the app and opened with `mainProcess`, the port of the Node debugger the app starts with `--inspect`.
 
 ```sh
 /Applications/MyApp.app/Contents/MacOS/MyApp --remote-debugging-port=9222 --inspect=9229
@@ -125,7 +127,7 @@ An Electron app runs each window's page in Chromium, and everything else in its 
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "inspect": 9229 }
+{ "name": "app", "attach": 9222, "mainProcess": 9229 }
 ```
 
 The code can be several statements, and the step hands back the value of the last one, with no `return`. If that value is a promise, it is awaited, and `await` works anywhere in the code. The electron module is there as `electron`, and its common parts by name: `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen`. `require` and [`stub`](#stub-standing-in-for-a-method) work too. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
@@ -172,7 +174,7 @@ Before using it:
 - **The debugger port is open to anything on the machine** while the app runs, and anything that connects to it can run code as the app. Turn it on only while testing, on a port of your own choosing. weblab never turns it on itself.
 - **Not every app can be joined.** An app packaged with the `EnableNodeCliInspectArguments` [fuse](https://www.electronjs.org/docs/latest/tutorial/fuses) turned off ignores `--inspect`. Its windows can still be attached. Dev builds normally have the fuse on.
 - **Quitting and restarting aren't blocked.** If the app exits while a session is joined to it, weblab lets go at once, so a dev tool's restart goes through. The next step on that session says the app went away, and `list` marks it as gone. End the session and open a new one on the restarted app. If weblab started the app, ending its last session stops the restarted app too, so open the new session first.
-- **Both ports must belong to the same app.** An app's main process is also the browser process behind its windows, so `new` refuses an `attach` and an `inspect` that point at two different apps.
+- **Both ports must belong to the same app.** An app's main process is also the browser process behind its windows, so `new` refuses an `attach` and a `mainProcess` that point at two different apps.
 
 ### stub: standing in for a method
 
