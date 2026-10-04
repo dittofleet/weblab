@@ -256,7 +256,8 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   const dir = out();
   await lab.tool("new", { ...BASE, out: dir });
   const failed = await lab.tool("run", { steps: [{ click: "#inc" }, { expect: "not there", timeout: 300, message: "the greeting is missing" }, { click: "#inc" }] });
-  assert.equal(failed.isError, true);
+  // A failure is a result, not an error: clients that show an error's text alone would drop its picture.
+  assert.equal(failed.isError, false);
   assert.match(failed.text, /ok {4}1 click/);
   assert.match(failed.text, /FAIL {2}2 expect: the greeting is missing \(expected the text "not there" to be visible\)/);
   assert.doesNotMatch(failed.text, /3 click/);
@@ -472,6 +473,9 @@ test("params fill steps and files, code hands back values, and a shot is held to
   assert.match(values.text, /ok {4}1 playwright \(\d+ms\)\n {2}ok {4}1\.1 goto \(\d+ms\)\n {2}ok {4}1\.2 js \(\d+ms\)\n {2}"fixture"\n\{\s+"title": "fixture"\s+\}/);
   const thrown = await lab.tool("run", { file: join(kit, "code", "throws.ts") });
   assert.match(thrown.text, /FAIL {2}1 playwright: thrown by the code \(throws\.ts:4\)/);
+  // An error that runs to several lines, like an assertion's diff, is said whole.
+  const asserted = await lab.tool("run", { file: join(kit, "code", "asserts.ts") });
+  assert.match(asserted.text, /FAIL {2}1 playwright: Expected values to be strictly deep-equal:\n[\s\S]*\+ {3}count: 1\n- {3}count: 2\n {2}\} \(asserts\.ts:5\)/);
   const inner = await lab.tool("run", { file: join(kit, "code", "fails.ts") });
   assert.match(inner.text, /FAIL {2}1 playwright: its step 2 \(expect\): deliberately missing/);
   const caught = await lab.tool("run", { file: join(kit, "code", "caught.ts") });

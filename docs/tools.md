@@ -2,7 +2,7 @@
 
 This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages. It lists every argument, what each reply holds, how weblab finds or starts the app, and where files go.
 
-A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when a step failed or the call could not be done; the text says why.
+A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when the call could not be done, and the text says why. A step that ran and failed is not an error but a result: its `FAIL` line says why, and its screenshot comes with it, which a client showing an error's text alone would leave out.
 
 Examples show a tool's arguments as JSON, under the tool's name, and the reply text below them. `$TMPDIR` in a reply stands for the system's temp directory.
 
@@ -153,7 +153,7 @@ FAIL  2 expect: the greeting is missing (expected the text "not there" to be vis
 shot  $TMPDIR/weblab/fixture-20261003-101600/shots/main-FAIL-2-expect.png
 ```
 
-The steps after it don't run. The reply is an error, and carries a screenshot of the page as it was when the step failed. A step's `message` leads the reason, and what actually happened follows in brackets. A step that failed on another session starts with `on <name>:`. A step that a code step ran says which (`its step 2 (expect): ...`), and an error thrown by a code file names its file and line (`(check.ts:12)`).
+The steps after it don't run. The reply carries a screenshot of the page as it was when the step failed. A step's `message` leads the reason, and what actually happened follows in brackets. A step that failed on another session starts with `on <name>:`. A step that a code step ran says which (`its step 2 (expect): ...`), and an error thrown by a code file is given whole (an assertion's diff included) and names its file and line (`(check.ts:12)`).
 
 A step whose options are wrong (a misspelt option, a ref no `look` printed) fails without a screenshot, since it says nothing about the page:
 

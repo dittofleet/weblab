@@ -44,8 +44,13 @@ export function stepError(error: unknown): string {
   const message = stripAnsi(error instanceof Error ? error.message : String(error));
   // weblab's own reasons are written to be read whole, list and all.
   if (error instanceof StepFailure) return message;
+  // Any other error is said whole, since code's own can run to several
+  // lines (an assertion's diff), less the stack some messages carry.
+  if (!message.includes("\nCall log:")) {
+    const whole = message.split("\n").filter((line) => !/^\s+at /.test(line)).join("\n").trim();
+    return whole.length > 2000 ? `${whole.slice(0, 1997)}...` : whole;
+  }
   const [first = ""] = message.split("\n");
-  if (!message.includes("\nCall log:")) return briefError(error);
   const log = message
     .slice(message.indexOf("\nCall log:") + 1)
     .split("\n")
