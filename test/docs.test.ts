@@ -38,6 +38,9 @@ test("a step's name reads its section, with only its own row of the table", () =
     for (const other of STEP_NAMES) if (other !== step) assert.ok(!listed.has(other), `docs section "${step}" has a row for ${other}`);
   }
   assert.match(docSection("colorscheme"), /^\| `colorScheme` \|/m, "a step's name is matched in any case");
+  assert.match(docSection("`mock`"), /^\| `mock` \|/m, "a step's name in backticks is matched");
+  // A code step's own section on the code page is offered too.
+  assert.match(docSection("playwright"), /\n\nAlso under that name: weblab:\/\/docs\/code#playwright-the-whole-playwright-api$/);
   // The parts of a section under headings of their own are named, not included.
   const capturing = docSection("shot");
   assert.match(capturing, /^weblab:\/\/docs\/steps#reading-and-capturing\n/);
@@ -56,6 +59,7 @@ test("a heading reads by its title or its anchor, and a step's name comes before
   assert.match(docSection("new", "tools"), /^weblab:\/\/docs\/tools#new\n\n## new\n/);
   assert.throws(() => docSection("clik"), /no section "clik" in the docs \(did you mean "click"\?\)/);
   assert.throws(() => docSection("refs", "tools"), /no section "refs" in the tools page/);
+  assert.throws(() => docSection(" "), /section is empty/);
 });
 
 test("every link to a part of a page names a heading there", () => {

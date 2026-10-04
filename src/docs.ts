@@ -40,8 +40,11 @@ export const docIndex = () => DOCS.map(pageLine).join("\n");
 
 // ---- sections
 
-/** A `##` or `###` heading and what follows it, up to the next heading of either. */
-type Section = { page: DocPage; title: string; anchor: string; lines: string[]; inside: Section[]; steps: string[] };
+/**
+ * A `##` or `###` heading and what follows it, up to the next heading of
+ * either, with the step each line's row names in a table of steps.
+ */
+type Section = { page: DocPage; title: string; anchor: string; lines: string[]; rows: (string | undefined)[]; inside: Section[]; steps: string[] };
 
 /** A heading's anchor, as GitHub makes it: what links to it say after the #. */
 const anchorOf = (title: string) =>
@@ -54,53 +57,40 @@ const anchorOf = (title: string) =>
 const TABLE_OF_STEPS = /^\| Step \|/;
 const rowName = (line: string) => /^\| `([\w-]+)` \|/.exec(line)?.[1];
 
-/** Each line's step, for the rows of a table of steps (not one in an example's code block). */
-function stepRows(lines: string[]): (string | undefined)[] {
-  let inTable = false;
-  let fenced = false;
-  return lines.map((line) => {
-    if (line.startsWith("```")) fenced = !fenced;
-    if (TABLE_OF_STEPS.test(line)) inTable = !fenced;
-    else if (!line.startsWith("|")) inTable = false;
-    return inTable ? rowName(line) : undefined;
-  });
-}
-
 function sectionsOf(page: DocPage): Section[] {
   const found: Section[] = [];
   let current: Section | undefined;
   let parent: Section | undefined;
   let fenced = false;
-  for (const line of page.text.split("\n")) {
+  let inTable = false;
+  for (const line of page.text.split(/\r?\n/)) {
     if (line.startsWith("```")) fenced = !fenced;
-    // A # inside a code block is a shell comment, not a heading.
+    // A # inside a code block is a shell comment, not a heading, and a table there is an example.
     const heading = fenced ? null : /^(#{2,3}) (.+)$/.exec(line);
-    if (heading === null) {
-      current?.lines.push(line);
-      continue;
+    if (heading !== null) {
+      const title = heading[2] as string;
+      current = { page, title, anchor: anchorOf(title), lines: [], rows: [], inside: [], steps: [] };
+      if (heading[1] === "##") parent = current;
+      else parent?.inside.push(current);
+      found.push(current);
     }
-    const title = heading[2] as string;
-    current = { page, title, anchor: anchorOf(title), lines: [line], inside: [], steps: [] };
-    if (heading[1] === "##") parent = current;
-    else parent?.inside.push(current);
-    found.push(current);
+    if (TABLE_OF_STEPS.test(line)) inTable = !fenced;
+    else if (!line.startsWith("|")) inTable = false;
+    const step = inTable ? rowName(line) : undefined;
+    current?.lines.push(line);
+    current?.rows.push(step);
+    if (step !== undefined) current?.steps.push(step);
   }
-  for (const section of found) section.steps = stepRows(section.lines).filter((name) => name !== undefined);
   return found;
 }
 
 const SECTIONS = DOCS.flatMap(sectionsOf);
 
-/** The section's lines, keeping only the given step's row in its table of steps. */
-function onlyStep(lines: string[], step: string): string[] {
-  const names = stepRows(lines);
-  return lines.filter((_line, index) => names[index] === undefined || names[index].toLowerCase() === step);
-}
-
 const sectionUri = (section: Section) => `${docUri(section.page.name)}#${section.anchor}`;
 
 function render(section: Section, step?: string): string {
-  const lines = step === undefined ? section.lines : onlyStep(section.lines, step);
+  // A step's section keeps only that step's row of its table of steps.
+  const lines = step === undefined ? section.lines : section.lines.filter((_line, index) => (section.rows[index]?.toLowerCase() ?? step) === step);
   const inside = section.inside.length === 0 ? [] : ["", `Sections inside this one: ${section.inside.map((one) => one.title).join("; ")}`];
   return [sectionUri(section), "", linked(lines.join("\n").trim(), section.page), ...inside].join("\n");
 }
@@ -111,7 +101,10 @@ function render(section: Section, step?: string): string {
  * "Refs", "refs", "steps#refs" or "weblab://docs/steps#refs".
  */
 export function docSection(asked: string, pageName?: string): string {
-  let wanted = asked.trim().replace(/^weblab:\/\/docs\//, "");
+  let wanted = asked
+    .trim()
+    .replace(/^`(.*)`$/, "$1")
+    .replace(/^weblab:\/\/docs\//, "");
   let pages = pageName === undefined ? DOCS.map((page) => page.name) : [pageName];
   const hash = wanted.indexOf("#");
   if (hash !== -1) {
@@ -119,19 +112,21 @@ export function docSection(asked: string, pageName?: string): string {
     if (named !== "") pages = [named];
     wanted = wanted.slice(hash + 1);
   }
+  if (wanted === "") throw new UsageError("section is empty: name a step or a heading, or leave section out for the pages and their sections");
   const among = SECTIONS.filter((section) => pages.includes(section.page.name));
   const step = wanted.toLowerCase();
   const anchor = anchorOf(wanted);
   // A step's name before a heading's, and each section once.
   const matches: { section: Section; step?: string }[] = [
     ...among.filter((section) => section.steps.some((name) => name.toLowerCase() === step)).map((section) => ({ section, step })),
-    ...among.filter((section) => section.anchor === anchor).map((section) => ({ section })),
+    // A code step's own section on the code page is titled for it: "playwright: the whole Playwright API".
+    ...among.filter((section) => section.anchor === anchor || section.title.toLowerCase().startsWith(`${step}:`)).map((section) => ({ section })),
   ].filter((match, index, all) => all.findIndex((other) => other.section === match.section) === index);
   const [first, ...others] = matches;
   if (first === undefined) {
     const guess = nearest(wanted, among.flatMap((section) => [section.title, ...section.steps]));
     const where = pages.length === 1 ? `the ${pages[0]} page` : "the docs";
-    throw new UsageError(`no section "${asked}" in ${where}${guess === undefined ? "" : ` (did you mean "${guess}"?)`}; docs with no arguments lists every page's sections`);
+    throw new UsageError(`no section "${asked}" in ${where}${guess === undefined ? "" : ` (did you mean "${guess}"?)`}. The docs tool with no arguments lists every page's sections.`);
   }
   const text = render(first.section, first.step);
   return others.length === 0 ? text : `${text}\n\nAlso under that name: ${others.map((other) => sectionUri(other.section)).join(", ")}`;
