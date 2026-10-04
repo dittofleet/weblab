@@ -32,14 +32,19 @@ export function filming(dir: string, files: string, say: (line: string) => void)
   let take: { name: string; tabs: Filmed[] } | null = null;
   let takes = 0;
 
+  // The tab is left without the cursor, as it was before the take: in
+  // every frame, since the init script put it in frames loaded meanwhile.
+  async function uncursor(page: Page, cursor: Disposable): Promise<void> {
+    await cursor.dispose().catch(() => {});
+    await Promise.all(page.frames().map((frame) => frame.evaluate(REMOVE_CURSOR).catch(() => {})));
+  }
+
   async function finish(filmed: Filmed): Promise<void> {
     if (filmed.done) return;
     filmed.done = true;
     const { page, path, cursor } = filmed;
     await page.screencast.stop().catch(() => {});
-    // The tab is left without the cursor, as it was before the take.
-    await cursor.dispose().catch(() => {});
-    await page.evaluate(REMOVE_CURSOR).catch(() => {});
+    await uncursor(page, cursor);
     filmed.kept = existsSync(path);
     if (filmed.kept) await mp4Beside(path, say);
   }
@@ -53,7 +58,9 @@ export function filming(dir: string, files: string, say: (line: string) => void)
     await page.evaluate(CURSOR).catch(() => {});
     const frame = page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => null));
     await page.screencast.start({ path, ...(frame === null || frame.width === 0 ? {} : { size: frame }) }).catch(async (error) => {
-      await cursor.dispose().catch(() => {});
+      // Playwright counts a screencast that failed to start as started: stopped, so a later take can.
+      await page.screencast.stop().catch(() => {});
+      await uncursor(page, cursor);
       throw new SetupError(`could not record the tab: ${briefError(error)}`);
     });
     take.tabs.push({ page, path, cursor });

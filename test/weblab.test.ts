@@ -513,9 +513,10 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   const same = await lab.tool("run", { steps: [{ goto: "/other" }, { hover: "h1" }, { js: "getComputedStyle(document.querySelector('[data-weblab-cursor]')).visibility" }, { shot: { as: "other", matches: join(dir, "shots", "plain-other.png") } }] });
   assert.equal(same.isError, false, same.text);
   assert.match(same.text, /"visible"/);
-  // Stopped, the video is written, and the page is left without the cursor.
-  const stopped = await lab.tool("run", { steps: [{ video: "stop" }, { js: "document.querySelector('[data-weblab-cursor]') === null" }] });
-  assert.match(stopped.text, /ok {4}2 js \(\d+ms\)\ntrue\n[\s\S]*file {2}.*videos\/main\.webm/);
+  // Stopped, the video is written, and the page is left without the cursor, in its frames too.
+  const cursors = "[document, document.querySelector('#frame').contentDocument].map((doc) => doc.querySelector('[data-weblab-cursor]') !== null)";
+  const stopped = await lab.tool("run", { steps: [{ goto: "/" }, { js: cursors }, { video: "stop" }, { js: cursors }] });
+  assert.match(stopped.text, /ok {4}2 js \(\d+ms\)\n\[\s*true,\s*true\s*\]\n[\s\S]*ok {4}4 js \(\d+ms\)\n\[\s*false,\s*false\s*\]\n[\s\S]*file {2}.*videos\/main\.webm/);
   assert.ok(existsSync(join(dir, "videos", "main.webm")));
   // A tab the steps move to during a take is recorded too, even one closed before the take ends.
   const tabs = await lab.tool("run", { steps: [{ goto: "/" }, { video: "start" }, { click: "#pop" }, { tab: "new" }, { tab: { close: true } }, { video: "stop" }] });
