@@ -113,13 +113,17 @@ export const inputSteps: Record<string, Action> = {
     }
   }),
 
-  press: step(`press a key or chord, on the page or an element: "Enter", "Meta+k", or { key, ...target }`, async (ctx, args) => {
+  press: step(`press a key or chord, on the page or an element: "Enter", "Meta+k", or { key, hold, ...target }`, async (ctx, args) => {
     // A bare string is the key, so an element is only named in the object form.
-    const { key } = arg<{ key: string }>(args, "key", "press");
-    if (key === undefined) bad("press", `a key like "Enter", or { key, ...target }`);
+    const { key, hold } = arg<{ key: string; hold?: number }>(args, "key", "press");
+    if (key === undefined) bad("press", `a key like "Enter", or { key, hold, ...target }`);
+    if (hold !== undefined && (typeof hold !== "number" || hold < 0)) bad("press", "hold as a number of milliseconds");
+    // Held, the key goes down, stays down for that long, and comes up:
+    // one keydown, without the repeats a held key sends by hand.
+    const options = { delay: hold };
     await front(ctx);
-    if (isObject(args) && hasTarget(args)) await locate(ctx, args, "press").press(String(key));
-    else await ctx.page.keyboard.press(String(key));
+    if (isObject(args) && hasTarget(args)) await locate(ctx, args, "press").press(String(key), options);
+    else await ctx.page.keyboard.press(String(key), options);
   }),
 
   type: step(`type key by key into what has focus, or into an element: "text" or { value, delay, ...target }`, async (ctx, args) => {
