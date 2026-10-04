@@ -15,7 +15,7 @@ import { z } from "zod";
 import { DOCS, docContents, docIndex, docSection, docText, docUri } from "./docs.ts";
 import { checkTimeout, fileSteps, inlineSteps } from "./script.ts";
 import { end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
-import { STEP_GROUPS } from "./steps/index.ts";
+import { STEP_NAMES_BY_GROUP } from "./steps/index.ts";
 import type { SessionOptions, Step, StepResult } from "./types.ts";
 import { updateNote } from "./update.ts";
 
@@ -252,7 +252,7 @@ const sessionOptions = z.object({
 const step = z.record(z.string(), z.unknown());
 
 // Each step's name, by group: what each takes is one docs call away.
-const STEPS = [...STEP_GROUPS.map(([title, steps]) => `${title}: ${Object.keys(steps).join(", ")}`), "Reusing steps: include (run a JSON file's steps, filling its ${name} placeholders)"].join("\n");
+const STEPS = STEP_NAMES_BY_GROUP.map(([title, names]) => `${title}: ${names.join(", ")}`).join("\n");
 
 // Claude Code cuts a tool's description at 2048 characters, so what an
 // agent needs first comes first, and the details are left to docs.

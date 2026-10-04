@@ -5,7 +5,7 @@
 //   cdp          one raw Chrome DevTools Protocol command
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import type { Action, ActionContext } from "../types.ts";
-import { arg, bad, step } from "./args.ts";
+import { arg, bad } from "./args.ts";
 
 const AsyncFunction = (async () => {}).constructor as new (...args: string[]) => (
   ...args: unknown[]
@@ -41,14 +41,14 @@ async function runFile(ctx: ActionContext, file: string, scope: unknown): Promis
 }
 
 export const codeSteps: Record<string, Action> = {
-  js: step(async (ctx, args) => {
+  js: async (ctx, args) => {
     const { code, file } = arg<{ code?: string; file?: string }>(args, "code", "js");
     if (typeof file === "string") return ctx.page.evaluate(readFileSync(await ctx.resolveFile(file), "utf8"));
     if (typeof code !== "string") return bad("js", `a JavaScript expression, as a string, or { file }`);
     return ctx.page.evaluate(code);
-  }),
+  },
 
-  css: step(async (ctx, args) => {
+  css: async (ctx, args) => {
     if (typeof args !== "string") bad("css", "CSS, as a string");
     await ctx.page.addStyleTag({ content: args });
     // Pages loaded from now on get it too, as soon as they have a document.
@@ -57,20 +57,20 @@ export const codeSteps: Record<string, Action> = {
       if (document.head) add();
       else document.addEventListener("DOMContentLoaded", add, { once: true });
     }, args);
-  }),
+  },
 
-  playwright: step(async (ctx, args) => {
+  playwright: async (ctx, args) => {
     const { code, file } = arg<{ code?: string; file?: string }>(args, "code", "playwright");
     const scope = codeScope(ctx);
     // The body of an async function: `await page.getByRole("button").click(); return page.url()`.
     if (typeof code === "string") return new AsyncFunction(...Object.keys(scope), code)(...Object.values(scope));
     if (typeof file === "string") return runFile(ctx, file, scope);
     return bad("playwright", "Playwright code as a string, or { file }");
-  }),
+  },
 
-  cdp: step(async (ctx, args) => {
+  cdp: async (ctx, args) => {
     const { method, params } = arg<{ method?: string; params?: Record<string, unknown> }>(args, "method", "cdp");
     if (typeof method !== "string") return bad("cdp", `"Domain.method", or { method, params }`);
     return ctx.cdp(method, params);
-  }),
+  },
 };

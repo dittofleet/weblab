@@ -2,7 +2,7 @@
 import { openedByWeblab } from "../tabs.ts";
 import { viewportSize } from "../util.ts";
 import type { Action, ActionContext, Ready } from "../types.ts";
-import { arg, bad, isObject, step } from "./args.ts";
+import { arg, bad, isObject } from "./args.ts";
 
 // Until the root has children a cold vite server has answered "load"
 // but the app has not mounted (it may even reload once it has
@@ -85,7 +85,7 @@ function visitedTabs(ctx: ActionContext): WeakSet<object> {
 }
 
 export const navigationSteps: Record<string, Action> = {
-  goto: step(async (ctx, args) => {
+  goto: async (ctx, args) => {
     const { url, ready } = arg<{ url: string; ready?: unknown }>(args, "url", "goto");
     if (typeof url !== "string") bad("goto", `a path or URL, or { url, ready }`);
     const response = await ctx.page.goto(absolute(ctx, url, "goto"), { waitUntil: "load" });
@@ -93,21 +93,21 @@ export const navigationSteps: Record<string, Action> = {
     if (response !== null && response.status() >= 400) ctx.note(`${url} answered ${response.status()}`);
     await appReady(ctx, readyArg("goto", ready));
     await centerMouse(ctx);
-  }),
+  },
 
-  reload: step(async (ctx, args) => {
+  reload: async (ctx, args) => {
     if (args !== true && args !== undefined && !isObject(args)) bad("reload", "no argument, or { ready }");
     await ctx.page.reload({ waitUntil: "load" });
     await appReady(ctx, isObject(args) ? readyArg("reload", args.ready) : undefined);
-  }),
+  },
 
-  ready: step(async (ctx, args) => {
+  ready: async (ctx, args) => {
     if (args !== true && !isObject(args)) bad("ready", "true, or { selector | text | js, timeout }");
     // A page still loading (a cold dev build, an app's window just opened) is waited for as goto would.
     await waitReady(ctx, readyArg("ready", args));
-  }),
+  },
 
-  back: step(async (ctx) => {
+  back: Object.assign(async (ctx: ActionContext) => {
     const before = ctx.page.url();
     await ctx.page.goBack({ waitUntil: "load" });
     // A new tab's history starts at a blank page, which is not somewhere to go back to.
@@ -117,7 +117,7 @@ export const navigationSteps: Record<string, Action> = {
     }
   }, { noArgs: true }),
 
-  tab: step(async (ctx, args) => {
+  tab: async (ctx, args) => {
     const timeout = ctx.timeout;
     const pages = () => ctx.context.pages();
     const visited = visitedTabs(ctx);
@@ -155,19 +155,19 @@ export const navigationSteps: Record<string, Action> = {
     await ctx.page.bringToFront();
     // A take being recorded follows the steps to this tab.
     await ctx.film.follow(ctx.page);
-  }),
+  },
 
-  viewport: step(async (ctx, args) => {
+  viewport: async (ctx, args) => {
     const { width, height, deviceScaleFactor } = (typeof args === "string" ? viewportSize(args) : args) ?? {};
     if (typeof width !== "number" || typeof height !== "number") bad("viewport", `{ width, height } or "800x600"`);
     if (deviceScaleFactor !== undefined) bad("viewport", `a size alone: the pixel scale is set when the session opens (new's viewport: "800x600@2")`);
     await ctx.page.setViewportSize({ width, height });
-  }),
+  },
 
-  colorScheme: step(async (ctx, args) => {
+  colorScheme: async (ctx, args) => {
     const schemes = { dark: "dark", light: "light", none: "no-preference", "no-preference": "no-preference" } as const;
     const colorScheme = schemes[args as keyof typeof schemes];
     if (colorScheme === undefined) bad("colorScheme", `"dark", "light" or "none"`);
     await ctx.page.emulateMedia({ colorScheme });
-  }),
+  },
 };

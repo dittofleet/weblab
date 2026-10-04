@@ -1,10 +1,6 @@
-// Shared by the step modules: how a step is declared, and how its
-// arguments (straight from JSON) are read and checked.
+// Shared by the step modules: how a step's arguments (straight from
+// JSON) are read and checked.
 import { UsageError } from "../errors.ts";
-import type { Action, ActionContext } from "../types.ts";
-
-/** A built-in step: the work, and optionally that it takes no argument. */
-export const step = (run: (ctx: ActionContext, args: any) => Promise<unknown>, shape: Pick<Action, "noArgs"> = {}): Action => Object.assign(run, shape);
 
 /** Keys any step may carry beside its action. */
 export const BESIDE_ACTION = ["timeout", "message", "note", "on"];

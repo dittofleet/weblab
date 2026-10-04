@@ -6,7 +6,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { UsageError } from "./errors.ts";
 import { BESIDE_ACTION } from "./steps/args.ts";
-import { builtinActions } from "./steps/index.ts";
+import { builtinActions, STEP_NAMES } from "./steps/index.ts";
 import { nearest } from "./util.ts";
 import type { Step } from "./types.ts";
 
@@ -132,7 +132,7 @@ function expand(steps: unknown[], where: string, base: string, params: Record<st
       return expanded.map((inner) => withDefaults(inner, inherited));
     }
     if (builtinActions[action] === undefined) {
-      const guess = nearest(action, [...Object.keys(builtinActions), "include"]);
+      const guess = nearest(action, STEP_NAMES);
       throw new UsageError(`${at}: unknown step "${action}"${guess === undefined ? "" : ` (did you mean "${guess}"?)`}; every step is listed in the run tool's description`);
     }
     if (file !== undefined) ORIGINS.set(step as Step, `${file} step ${index + 1}`);

@@ -7,7 +7,7 @@ export type LookFormat = (typeof LOOK_FORMATS)[number];
 import { StepFailure, UsageError } from "../errors.ts";
 import { captureScreen, SCREEN_AREAS, type ScreenArea } from "../screen.ts";
 import type { Action, ActionContext } from "../types.ts";
-import { arg, bad, isObject, step } from "./args.ts";
+import { arg, bad, isObject } from "./args.ts";
 import { readyArg, waitReady } from "./navigation.ts";
 import { ariaTree, hasTarget, locate } from "./target.ts";
 
@@ -114,7 +114,7 @@ async function compare(ctx: ActionContext, shot: string, { file: before, png }: 
 const EXTENSIONS: Record<LookFormat, string> = { refs: "yml", plain: "yml", text: "txt", html: "html" };
 
 export const captureSteps: Record<string, Action> = {
-  look: step(async (ctx, args) => {
+  look: async (ctx, args) => {
     const options = isObject(args) ? args : typeof args === "string" ? { as: args } : {};
     const format = (options.format ?? "refs") as LookFormat;
     if (!LOOK_FORMATS.includes(format)) bad("look", `a format of ${LOOK_FORMATS.join(", ")}`);
@@ -127,9 +127,9 @@ export const captureSteps: Record<string, Action> = {
       ctx.artifacts.addFile(path);
     }
     return text;
-  }),
+  },
 
-  shot: step(async (ctx, args) => {
+  shot: async (ctx, args) => {
     const { as, fullPage, animations, screen, matches, tolerance } = arg<{ as?: string; fullPage?: boolean; animations?: boolean; screen?: boolean | ScreenArea; matches?: string; tolerance?: number }>(args, "as", "shot");
     if (matches !== undefined && typeof matches !== "string") bad("shot", "matches to be the path of a screenshot taken before");
     if (tolerance !== undefined && !(typeof tolerance === "number" && tolerance >= 0 && tolerance <= 1)) bad("shot", "tolerance to be the share of pixels that may differ, from 0 to 1");
@@ -161,9 +161,9 @@ export const captureSteps: Record<string, Action> = {
     }
     ctx.artifacts.add(path);
     if (before !== undefined) await compare(ctx, path, before, String(as), tolerance ?? 0);
-  }),
+  },
 
-  video: step(async (ctx, args) => {
+  video: async (ctx, args) => {
     if (args === "stop") {
       if (!ctx.video) ctx.fail(`nothing is being recorded. Start with { "video": "start" }`);
       for (const path of await ctx.film.stop(ctx.page)) ctx.artifacts.addFile(path);
@@ -178,5 +178,5 @@ export const captureSteps: Record<string, Action> = {
     await ctx.film.start(ctx.page, as);
     // The drawn cursor is where the pointer is, from the first frame.
     await ctx.page.mouse.move(ctx.mouse.x, ctx.mouse.y);
-  }),
+  },
 };

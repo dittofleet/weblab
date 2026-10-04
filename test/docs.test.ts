@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DOCS, docSection } from "../src/docs.ts";
-import { builtinActions } from "../src/steps/index.ts";
+import { builtinActions, STEP_NAMES } from "../src/steps/index.ts";
 import { SESSION_KEYS } from "../src/steps/sessions.ts";
 
 const page = (name: string) => readFileSync(join(import.meta.dirname, "..", "docs", `${name}.md`), "utf8");
@@ -15,7 +15,7 @@ const rows = (text: string) => new Set([...text.matchAll(/^\| `([\w-]+)`/gm)].ma
 test("docs/steps.md has a row for every step, and for nothing that isn't one", () => {
   const steps = page("steps");
   const documented = rows(steps);
-  for (const step of [...Object.keys(builtinActions), "include"]) assert.ok(documented.has(step), `docs/steps.md has no row for the ${step} step`);
+  for (const step of STEP_NAMES) assert.ok(documented.has(step), `docs/steps.md has no row for the ${step} step`);
   // A row in a section of steps names a step: one that no longer exists is stale.
   const sections = steps.slice(steps.indexOf("## Getting around"), steps.indexOf("## Reusing steps"));
   for (const [, heading, body] of sections.matchAll(/^## (.+)\n([\s\S]*?)(?=^## |\Z)/gm)) {
@@ -30,12 +30,12 @@ test("docs/tools.md has a row for every argument of new and run", () => {
 });
 
 test("a step's name reads its section, with only its own row of the table", () => {
-  const steps = [...Object.keys(builtinActions), "include"];
-  for (const step of steps) {
+  for (const step of STEP_NAMES) {
     const section = docSection(step);
+    assert.match(section, /^weblab:\/\/docs\/steps#/, `docs section "${step}" isn't on the steps page`);
     const listed = rows(section);
     assert.ok(listed.has(step), `docs section "${step}" has no row for it`);
-    for (const other of steps) if (other !== step) assert.ok(!listed.has(other), `docs section "${step}" has a row for ${other}`);
+    for (const other of STEP_NAMES) if (other !== step) assert.ok(!listed.has(other), `docs section "${step}" has a row for ${other}`);
   }
   assert.match(docSection("colorscheme"), /^\| `colorScheme` \|/m, "a step's name is matched in any case");
   // The parts of a section under headings of their own are named, not included.

@@ -27,6 +27,11 @@ export const STEP_GROUPS: [title: string, steps: Record<string, Action>][] = [
 
 export const builtinActions: Record<string, Action> = Object.assign({}, ...STEP_GROUPS.map(([, steps]) => steps));
 
+/** Every step's name, by group: the built-in ones, and include, which script.ts runs. */
+export const STEP_NAMES_BY_GROUP: [title: string, names: string[]][] = [...STEP_GROUPS.map(([title, steps]): [string, string[]] => [title, Object.keys(steps)]), ["Reusing steps", ["include"]]];
+
+export const STEP_NAMES = STEP_NAMES_BY_GROUP.flatMap(([, names]) => names);
+
 // What each step's object form may hold, beside a target where it takes
 // one, so a misspelt option fails rather than being quietly ignored.
 const POINT = ["x", "y"];

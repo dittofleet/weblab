@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { builtinActions } from "../src/steps/index.ts";
+import { STEP_NAMES } from "../src/steps/index.ts";
 
 // From source by default; WEBLAB_BIN points the same tests at a compiled binary.
 const [bin, ...prefix] = process.env.WEBLAB_BIN ? [resolve(process.env.WEBLAB_BIN)] : ["bun", join(import.meta.dirname, "..", "src", "main.ts")];
@@ -141,8 +141,8 @@ test("it speaks the 2026-07-28 format, and still answers a client that opens wit
   // Every step is named in the run tool's description, and all of every description reaches
   // the agent: Claude Code cuts a tool's description, and the instructions, at 2048 characters.
   const run = listed.tools.find((tool: { name: string }) => tool.name === "run");
-  const named = new Set([...run.description.matchAll(/^[A-Z][\w ]+: (.+)$/gm)].flatMap((line) => line[1].replace(/ \(.*/, "").split(", ")));
-  for (const step of [...Object.keys(builtinActions), "include"]) assert.ok(named.has(step), `the run tool's description doesn't name ${step}`);
+  const named = new Set([...run.description.matchAll(/^[A-Z][\w ]+: (.+)$/gm)].flatMap((line) => line[1].split(", ")));
+  for (const step of STEP_NAMES) assert.ok(named.has(step), `the run tool's description doesn't name ${step}`);
   for (const tool of listed.tools) assert.ok(tool.description.length <= 2048, `the ${tool.name} tool's description is ${tool.description.length} characters`);
   assert.ok(discovered.instructions.length <= 2048, `the instructions are ${discovered.instructions.length} characters`);
   assert.deepEqual(Object.keys(run.inputSchema.properties).sort(), ["file", "params", "session", "steps", "timeout", "wait"]);

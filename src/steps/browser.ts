@@ -4,11 +4,11 @@ import { dirname } from "node:path";
 import { signInPath } from "../state.ts";
 import type { Action } from "../types.ts";
 import { briefError } from "../errors.ts";
-import { arg, bad, isObject, step } from "./args.ts";
+import { arg, bad, isObject } from "./args.ts";
 
 export const browserSteps: Record<string, Action> = {
   // Until a step says otherwise, dialogs are dismissed (see sessions.ts).
-  dialog: step(async (ctx, args) => {
+  dialog: async (ctx, args) => {
     const policy = typeof args === "string" ? { accept: args === "accept" } : args;
     const named = typeof args !== "string" || args === "accept" || args === "dismiss";
     if (!isObject(policy) || typeof policy.accept !== "boolean" || !named) {
@@ -17,9 +17,9 @@ export const browserSteps: Record<string, Action> = {
     // Changed in place: the session's dialog handler holds this very object.
     ctx.dialogs.accept = policy.accept as boolean;
     ctx.dialogs.text = policy.text as string | undefined;
-  }),
+  },
 
-  mock: step(async (ctx, args) => {
+  mock: async (ctx, args) => {
     if (!isObject(args) || typeof args.url !== "string") {
       bad("mock", "{ url, json | body | abort | off, status, contentType }");
     }
@@ -43,14 +43,14 @@ export const browserSteps: Record<string, Action> = {
       const answer = abort ? route.abort() : route.fulfill({ status: code, contentType, ...(json === undefined ? { body } : { json }) });
       return answer.catch((error) => ctx.log(`mock ${url} could not answer ${route.request().url()}: ${briefError(error)}`));
     });
-  }),
+  },
 
-  saveState: step(async (ctx, args) => {
+  saveState: async (ctx, args) => {
     const { name } = arg<{ name: string }>(args, "name", "saveState");
     if (typeof name !== "string") bad("saveState", "a name");
     const path = signInPath(ctx.app, name);
     mkdirSync(dirname(path), { recursive: true });
     await ctx.context.storageState({ path });
     ctx.log(`state ${name} saved`);
-  }),
+  },
 };

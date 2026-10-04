@@ -6,7 +6,7 @@ import type { Page } from "playwright-core";
 import { UsageError } from "../errors.ts";
 import type { Action, ActionContext } from "../types.ts";
 import { globRegExp } from "../util.ts";
-import { arg, bad, isObject, step } from "./args.ts";
+import { arg, bad, isObject } from "./args.ts";
 import { hasTarget, locate } from "./target.ts";
 
 /**
@@ -297,13 +297,13 @@ async function poll(check: () => Promise<boolean>, timeout: number): Promise<boo
 export const EXPECT_KEYS = [...EXPECTATIONS.map(([key]) => key), "text", "status", "timeout", "message"];
 
 export const checkSteps: Record<string, Action> = {
-  wait: step(async (ctx, args) => {
+  wait: async (ctx, args) => {
     const { ms } = arg<{ ms: number }>(args, "ms", "wait");
     if (!Number.isFinite(Number(ms))) bad("wait", "a number of milliseconds");
     await ctx.page.waitForTimeout(Number(ms));
-  }),
+  },
 
-  expect: step(async (ctx, given) => {
+  expect: async (ctx, given) => {
     // A plain string is text that should be visible.
     const args = typeof given === "string" ? { text: given } : given;
     if (!isObject(args)) bad("expect", `text that should be visible, or { visible | hidden | text | url | js | ... }`);
@@ -325,5 +325,5 @@ export const checkSteps: Record<string, Action> = {
     const { holds, wanted, once } = build(ctx, check);
     const ok = once ? await holds() : await poll(holds, timeout ?? ctx.timeout);
     if (!ok) ctx.fail(message ?? `expected ${wanted()}`);
-  }),
+  },
 };

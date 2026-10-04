@@ -23,28 +23,53 @@ export const DOCS: DocPage[] = [
 export const docUri = (name: string) => `weblab://docs/${name}`;
 
 // Links between pages, as they are written for a reader on disk, say where the page is here.
-const linked = (text: string) => text.replace(/\]\((tools|steps|sessions|code|recipes)\.md(#[\w-]+)?\)/g, (_whole, name: string, anchor = "") => `](${docUri(name)}${anchor})`);
+// So does a link within a page, given the page, for a part of it read apart from the rest.
+const LINK = new RegExp(`\\]\\((?:(${DOCS.map((page) => page.name).join("|")})\\.md)?(#[\\w-]+)?\\)`, "g");
+const linked = (text: string, within?: DocPage) =>
+  text.replace(LINK, (whole, name: string | undefined, anchor = "") => {
+    const page = name ?? (anchor === "" ? undefined : within?.name);
+    return page === undefined ? whole : `](${docUri(page)}${anchor})`;
+  });
 
 export const docText = (page: DocPage) => linked(page.text);
 
+const pageLine = (page: DocPage) => `${page.name}: ${page.about}`;
+
 /** The pages there are, a line each. */
-export const docIndex = () => DOCS.map((page) => `${page.name}: ${page.about}`).join("\n");
+export const docIndex = () => DOCS.map(pageLine).join("\n");
 
 // ---- sections
 
 /** A `##` or `###` heading and what follows it, up to the next heading of either. */
-type Section = { page: DocPage; level: number; title: string; anchor: string; lines: string[]; inside: Section[] };
+type Section = { page: DocPage; title: string; anchor: string; lines: string[]; inside: Section[]; steps: string[] };
 
 /** A heading's anchor, as GitHub makes it: what links to it say after the #. */
-export const anchorOf = (title: string) =>
+const anchorOf = (title: string) =>
   title
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
     .replace(/\s/g, "-");
 
+// A step's row in a table of steps: | `name` | ...
+const TABLE_OF_STEPS = /^\| Step \|/;
+const rowName = (line: string) => /^\| `([\w-]+)` \|/.exec(line)?.[1];
+
+/** Each line's step, for the rows of a table of steps (not one in an example's code block). */
+function stepRows(lines: string[]): (string | undefined)[] {
+  let inTable = false;
+  let fenced = false;
+  return lines.map((line) => {
+    if (line.startsWith("```")) fenced = !fenced;
+    if (TABLE_OF_STEPS.test(line)) inTable = !fenced;
+    else if (!line.startsWith("|")) inTable = false;
+    return inTable ? rowName(line) : undefined;
+  });
+}
+
 function sectionsOf(page: DocPage): Section[] {
   const found: Section[] = [];
   let current: Section | undefined;
+  let parent: Section | undefined;
   let fenced = false;
   for (const line of page.text.split("\n")) {
     if (line.startsWith("```")) fenced = !fenced;
@@ -54,33 +79,17 @@ function sectionsOf(page: DocPage): Section[] {
       current?.lines.push(line);
       continue;
     }
-    const level = (heading[1] as string).length;
     const title = heading[2] as string;
-    current = { page, level, title, anchor: anchorOf(title), lines: [line], inside: [] };
-    if (level === 3) found.findLast((one) => one.level === 2)?.inside.push(current);
+    current = { page, title, anchor: anchorOf(title), lines: [line], inside: [], steps: [] };
+    if (heading[1] === "##") parent = current;
+    else parent?.inside.push(current);
     found.push(current);
   }
+  for (const section of found) section.steps = stepRows(section.lines).filter((name) => name !== undefined);
   return found;
 }
 
 const SECTIONS = DOCS.flatMap(sectionsOf);
-
-// A step's row in a table of steps: | `name` | ...
-const TABLE_OF_STEPS = /^\| Step \|/;
-const rowName = (line: string) => /^\| `([\w-]+)` \|/.exec(line)?.[1];
-
-/** Each line's step, for the rows of a table of steps. */
-function stepRows(lines: string[]): (string | undefined)[] {
-  let inTable = false;
-  return lines.map((line) => {
-    if (TABLE_OF_STEPS.test(line)) inTable = true;
-    else if (!line.startsWith("|")) inTable = false;
-    return inTable ? rowName(line) : undefined;
-  });
-}
-
-/** The steps a section's table of steps has a row for. */
-const stepsIn = (section: Section) => stepRows(section.lines).filter((name) => name !== undefined);
 
 /** The section's lines, keeping only the given step's row in its table of steps. */
 function onlyStep(lines: string[], step: string): string[] {
@@ -92,10 +101,8 @@ const sectionUri = (section: Section) => `${docUri(section.page.name)}#${section
 
 function render(section: Section, step?: string): string {
   const lines = step === undefined ? section.lines : onlyStep(section.lines, step);
-  // A link within the page needs its page, now that it is read apart from it.
-  const text = linked(lines.join("\n").trim()).replace(/\]\(#([\w-]+)\)/g, `](${docUri(section.page.name)}#$1)`);
   const inside = section.inside.length === 0 ? [] : ["", `Sections inside this one: ${section.inside.map((one) => one.title).join("; ")}`];
-  return [sectionUri(section), "", text, ...inside].join("\n");
+  return [sectionUri(section), "", linked(lines.join("\n").trim(), section.page), ...inside].join("\n");
 }
 
 /**
@@ -114,21 +121,22 @@ export function docSection(asked: string, pageName?: string): string {
   }
   const among = SECTIONS.filter((section) => pages.includes(section.page.name));
   const step = wanted.toLowerCase();
-  const forStep = among.filter((section) => stepsIn(section).some((name) => name.toLowerCase() === step));
-  const forHeading = among.filter((section) => section.anchor === anchorOf(wanted) && !forStep.includes(section));
-  const [first, ...others] = [...forStep, ...forHeading];
+  const anchor = anchorOf(wanted);
+  // A step's name before a heading's, and each section once.
+  const matches: { section: Section; step?: string }[] = [
+    ...among.filter((section) => section.steps.some((name) => name.toLowerCase() === step)).map((section) => ({ section, step })),
+    ...among.filter((section) => section.anchor === anchor).map((section) => ({ section })),
+  ].filter((match, index, all) => all.findIndex((other) => other.section === match.section) === index);
+  const [first, ...others] = matches;
   if (first === undefined) {
-    const guess = nearest(wanted, among.flatMap((section) => [section.title, ...stepsIn(section)]));
+    const guess = nearest(wanted, among.flatMap((section) => [section.title, ...section.steps]));
     const where = pages.length === 1 ? `the ${pages[0]} page` : "the docs";
     throw new UsageError(`no section "${asked}" in ${where}${guess === undefined ? "" : ` (did you mean "${guess}"?)`}; docs with no arguments lists every page's sections`);
   }
-  const text = render(first, forStep.includes(first) ? step : undefined);
-  return others.length === 0 ? text : `${text}\n\nAlso under that name: ${others.map(sectionUri).join(", ")}`;
+  const text = render(first.section, first.step);
+  return others.length === 0 ? text : `${text}\n\nAlso under that name: ${others.map((other) => sectionUri(other.section)).join(", ")}`;
 }
 
 /** The pages, a line each, with the sections each one has. */
 export const docContents = () =>
-  DOCS.map((page) => {
-    const titles = SECTIONS.filter((section) => section.page === page).map((section) => section.title);
-    return `${page.name}: ${page.about}\n  sections: ${titles.join("; ")}`;
-  }).join("\n");
+  DOCS.map((page) => `${pageLine(page)}\n  sections: ${SECTIONS.filter((section) => section.page === page).map((section) => section.title).join("; ")}`).join("\n");
