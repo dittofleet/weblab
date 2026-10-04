@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/dittofleet/weblab/main/install.sh |
 
 This puts one binary at `~/.local/bin/weblab` (set `WEBLAB_INSTALL_DIR` to change that). weblab runs on macOS, on Apple silicon and Intel, and drives a browser already on the machine: Google Chrome by default, or another Chromium browser.
 
+To update, run `weblab update`. A running weblab looks for a newer release once a day, and says so in the reply to `new` when there is one.
+
 ## Register it with an MCP client
 
 weblab speaks MCP over stdio, so the client starts it:

@@ -17,6 +17,7 @@ import { checkTimeout, fileSteps, inlineSteps } from "./script.ts";
 import { end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
 import { STEP_GROUPS } from "./steps/index.ts";
 import type { SessionOptions, Step, StepResult } from "./types.ts";
+import { updateNote } from "./update.ts";
 
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 type Result = { content: Content[]; isError?: boolean };
@@ -211,6 +212,9 @@ const describe = (open: Session): string => {
 
 // ---- the tools
 
+// Whether this weblab has said a newer release is out.
+let noted = false;
+
 const viewport = z.union([
   z.string().describe(`"1440x900", or "390x844@3" with a pixel scale`),
   z.object({ width: z.number().optional(), height: z.number().optional(), deviceScaleFactor: z.number().optional() }),
@@ -297,7 +301,10 @@ export function createServer(version: string): McpServer {
         const lines = news(running);
         if (!has(job.on)) return result(lines, true);
         const opened = session(job.on);
-        return result([`session ${describe(opened)}`, `files ${opened.dir}`, ...lines, ...(await where(job.on, true))], failed(job));
+        // A newer release is said once, where a session starts.
+        const note = noted ? null : updateNote();
+        noted ||= note !== null;
+        return result([`session ${describe(opened)}`, `files ${opened.dir}`, ...lines, ...(await where(job.on, true)), ...(note === null ? [] : ["", note])], failed(job));
       }),
   );
 

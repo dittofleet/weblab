@@ -42,7 +42,7 @@ const all: Weblab[] = [];
 let count = 0;
 
 function weblab(env: Record<string, string> = {}): Weblab {
-  const child = spawn(bin as string, prefix, { cwd: app, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), ...env }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(bin as string, prefix, { cwd: app, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const waiting = new Map<number, (message: any) => void>();
   createInterface({ input: child.stdout! }).on("line", (line) => {
     // Nothing but the protocol is ever on stdout.

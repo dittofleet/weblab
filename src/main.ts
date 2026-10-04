@@ -8,6 +8,7 @@ import { onTeardown, teardown } from "./lifecycle.ts";
 import { createServer } from "./mcp.ts";
 import { sweepServers } from "./server.ts";
 import { shutdown } from "./sessions.ts";
+import { update } from "./update.ts";
 
 const HELP = `weblab ${manifest.version}: an MCP server for testing and exploring web apps in a real browser.
 
@@ -18,11 +19,19 @@ It speaks MCP over stdio, so it is started by an MCP client, not by hand:
 
 or, in a client's JSON config:  { "command": "weblab" }
 
-Its tools: new (open a session), run (run steps on one), end, list, docs.`;
+Its tools: new (open a session), run (run steps on one), end, list, docs.
+
+  weblab update      install the latest release
+  weblab --version   print this one's version`;
 
 const [flag] = process.argv.slice(2);
 if (flag === "--version" || flag === "-v") {
   console.log(manifest.version);
+} else if (flag === "update") {
+  process.exitCode = await update().catch((error) => {
+    console.error(`weblab: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  });
 } else if (flag !== undefined) {
   console.log(HELP);
   process.exitCode = flag === "--help" || flag === "-h" ? 0 : 1;
