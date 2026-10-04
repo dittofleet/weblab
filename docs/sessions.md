@@ -136,7 +136,7 @@ Other weblab processes on the machine (another agent's, say) share servers the s
 
 `attach` joins a browser or app that is already running, over the remote debugging port it was started with, instead of launching one. That covers what a fresh browser can't:
 
-- **An Electron app.** Its windows are Chromium pages, so every step works on them, and `js` can call whatever the app puts on `window`.
+- **An Electron app.** Its windows are Chromium pages, so every step works on them, and `js` can call whatever the app puts on `window`. With `inspect`, code runs in its [main process](#the-main-process) too.
 - **A browser that is already set up**, signed in to accounts a test needs, or with extensions.
 
 ### Starting it with a debugging port
@@ -153,6 +153,18 @@ Choose a free port yourself, and attach only to a browser or app you started.
 
 An Electron app that doesn't take the switch can turn it on itself with `app.commandLine.appendSwitch("remote-debugging-port", port)` before the app is ready.
 
+An app started through its dev tooling needs the flags passed along. With Electron Forge, everything after `--` goes to the app: `electron-forge start -- --remote-debugging-port=9222 --inspect=9229`. Forge's own `--inspect-electron` flag always uses port 9229. An app's own launch script may need changing to pass the flags on.
+
+weblab can also start the app itself, and stop it when the session ends. Give the debugging port as `address` too, and the command as `start`. The command gets the port in `PORT`:
+
+`new`
+
+```json
+{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+```
+
+If an app started by hand exits at once with `Cannot find module 'electron'`, it ran as plain Node. The shell has `ELECTRON_RUN_AS_NODE` set, which happens in a terminal opened from another Electron app, such as an editor. Put `env -u ELECTRON_RUN_AS_NODE` in front of the command. Commands weblab starts never get the variable.
+
 ### Driving it
 
 `new`
@@ -168,7 +180,7 @@ url   myapp://main/index.html
 title My App
 ```
 
-`attach` takes a port, `host:port`, or a full `http://` or `ws://` address. `tab` picks the tab whose URL or title contains it; without it, the first tab that isn't one of the browser's own pages. `newTab` opens a fresh tab to drive instead, and leaves the browser's own alone.
+`attach` takes a port, `host:port`, or a full `http://` or `ws://` address. `tab` picks the tab whose URL or title contains it; without it, the first tab that isn't one of the browser's own pages. `newTab` opens a fresh tab to drive instead, and leaves the browser's own alone. An Electron app can't open new tabs, so `tab` is how one of its windows is picked.
 
 - **It stays where it is.** With no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one was given, else the page's current origin, an app's own scheme included.
 - **No server is started** unless `address` or `start` is given.
@@ -198,6 +210,34 @@ Two windows of a desktop app, or two apps that talk to each other, are two sessi
 ```json
 { "session": "a", "steps": [{ "click": "text=Send invite" }, { "expect": "Invitation from A", "on": "b" }] }
 ```
+
+### The main process
+
+An Electron app's main process owns its windows, menus, native dialogs and IPC, none of which a step in a window can reach. An app started with `--inspect` as well opens a Node debugger on a second port, and `inspect` joins it alongside the window:
+
+```sh
+/Applications/MyApp.app/Contents/MacOS/MyApp --remote-debugging-port=9222 --inspect=9229
+```
+
+`new`
+
+```json
+{ "name": "app", "attach": 9222, "inspect": 9229 }
+```
+
+```text
+session app  attached to 9222, main process at 9229
+```
+
+[`electron`](code.md#electron-the-apps-main-process) steps then run code there, and what the main process logs shows up in replies next to what the window logs:
+
+`run`
+
+```json
+{ "session": "app", "steps": [{ "electron": "stub(dialog, 'showMessageBox', async () => ({ response: 1 }))" }, { "click": "text=Delete" }, { "expect": "Kept" }] }
+```
+
+Stubs are put back when the session ends, but anything else the code changes stays until the app restarts. The debugger port stays open to anything on the machine for as long as the app runs. If the app quits or restarts, the next step says so, and the session has to be ended and opened again. When weblab started the app, open the new session before ending the old one, or ending it stops the restarted app. [Code](code.md#electron-the-apps-main-process) covers the rest.
 
 ## Other browsers and engines
 

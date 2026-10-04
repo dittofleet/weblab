@@ -12,6 +12,7 @@ import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { STEP_NAMES } from "../src/steps/index.ts";
+import { onPath } from "../src/util.ts";
 
 // From source by default; WEBLAB_BIN points the same tests at a compiled binary.
 const [bin, ...prefix] = process.env.WEBLAB_BIN ? [resolve(process.env.WEBLAB_BIN)] : ["bun", join(import.meta.dirname, "..", "src", "main.ts")];
@@ -561,11 +562,11 @@ test("a video is recorded from when it starts, with the app ready, until it stop
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 // A Chrome started the way an Electron app or a debuggable browser is: with a port to join it by.
-async function runningChrome(name: string, title: string): Promise<{ port: number; stop(): void }> {
+async function runningChrome(name: string, title: string): Promise<{ port: number; pid: number; stop(): void }> {
   const port = await freePort();
   const chrome = spawn(CHROME, [`--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, name)}`, "--headless=new", "--no-first-run", `data:text/html,<title>${title}</title><h1>${title}</h1><button onclick="this.textContent='pressed'">Press</button>`], { stdio: "ignore" });
   for (const deadline = Date.now() + 15_000; !(await answers(`http://127.0.0.1:${port}/json/version`)) && Date.now() < deadline; ) await sleep(100);
-  return { port, stop: () => chrome.kill() };
+  return { port, pid: chrome.pid as number, stop: () => chrome.kill() };
 }
 
 test("two running apps are two sessions, joined by their ports and left as they were", { skip: !existsSync(CHROME) }, async () => {
@@ -600,6 +601,161 @@ test("two running apps are two sessions, joined by their ports and left as they 
   } finally {
     a.stop();
     b.stop();
+  }
+});
+
+const NODE = onPath("node");
+
+// An Electron app's main process, as far as weblab can tell: a Node
+// process started with --inspect, with a stand-in electron module, that
+// says it is the process of the window it is given.
+async function mainProcess(port: number, windowPid?: number): Promise<{ exited: Promise<void>; stop(): Promise<void> }> {
+  const dir = join(kit, "electron");
+  const env = { ...process.env, NODE_PATH: join(dir, "modules"), ...(windowPid === undefined ? {} : { WINDOW_PID: String(windowPid) }) };
+  const node = spawn(NODE as string, [`--inspect=127.0.0.1:${port}`, "main.js"], { cwd: dir, env, stdio: "ignore" });
+  const exited = new Promise<void>((done) => node.on("exit", () => done()));
+  for (const deadline = Date.now() + 15_000; !(await answers(`http://127.0.0.1:${port}/json/list`)) && Date.now() < deadline; ) await sleep(100);
+  return { exited, stop: () => (node.kill("SIGKILL"), exited) };
+}
+
+test("an Electron app's main process runs code beside its window, joined by its own port", { skip: !existsSync(CHROME) || NODE === null }, async () => {
+  const window = await runningChrome("electron-window", "App Window");
+  const port = await freePort();
+  const other = await freePort();
+  const main = await mainProcess(port, window.pid);
+  const stranger = await mainProcess(other);
+  try {
+    const lab = weblab();
+    assert.match((await lab.tool("new", { name: "x", inspect: port })).text, /inspect joins the main process of an Electron app the session is attached to, so it needs attach/);
+    assert.match((await lab.tool("new", { name: "x", attach: window.port, inspect: window.port })).text, new RegExp(`${window.port} is the app's Chromium debugging port, which is for attach\\. inspect takes the main process's Node one`));
+    // Two ports of two apps are refused: the window's process isn't the main process.
+    assert.match((await lab.tool("new", { name: "x", attach: window.port, inspect: other })).text, new RegExp(`attach ${window.port} and inspect ${other} are two different apps`));
+    const opened = await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    assert.equal(opened.failed, false, opened.text);
+    assert.match(opened.text, new RegExp(`^session app {2}attached to ${window.port}, main process at ${port}\n`));
+    // One electron step on a session, and the reply.
+    const inMain = async (code: string, options: { session?: string; timeout?: number } = {}) =>
+      (await lab.tool("run", { session: options.session ?? "app", steps: [{ electron: code, ...(options.timeout === undefined ? {} : { timeout: options.timeout }) }] })).text;
+
+    const ran = await lab.tool("run", {
+      session: "app",
+      steps: [
+        { electron: "app.getName()" },
+        // Statements, awaited, with the last one's value handed back. What they declare with const stays theirs.
+        { electron: "const name = app.getName(); await new Promise((done) => setTimeout(done, 20)); name.toUpperCase()" },
+        { electron: "typeof name" },
+        { electron: "console.log('%s has %d', 'main', 2, { a: 1, list: [1, 2] }); ({ windows: BrowserWindow.getAllWindows().length })" },
+        // What isn't data comes back as what it is, at any depth.
+        { electron: "const tray = new (class Tray {})(); const loop = { tray, n: NaN, big: 10n, map: new Map([['k', 1]]), save: function save() {} }; loop.self = loop; loop" },
+        { playwright: "return electron(({ app }, suffix) => app.getName() + suffix, '!')" },
+        // The window is the same session's: its steps go to the tab.
+        { js: "document.title" },
+      ],
+    });
+    assert.equal(ran.failed, false, ran.text);
+    assert.match(ran.text, /ok {4}1 electron \(\d+ms\)\n"fixture"\nok {4}2 electron \(\d+ms\)\n"FIXTURE"\nok {4}3 electron \(\d+ms\)\n"undefined"\nok {4}4 electron \(\d+ms\)\n\{\s*"windows": 0\s*\}\nok {4}5 electron/);
+    assert.match(ran.text, /"tray": "\[Tray\]",\s*"n": "NaN",\s*"big": "10n",\s*"map": \{\s*"k": 1\s*\},\s*"save": "\[Function save\]",\s*"self": "\[Circular\]"/);
+    assert.match(ran.text, /ok {4}6 playwright \(\d+ms\)\n"fixture!"\nok {4}7 js \(\d+ms\)\n"App Window"/);
+    assert.match(ran.text, /\[main console\.log\] main has 2 \{ a: 1, list: Array\(2\) \}/);
+
+    // The names it is handed can be declared again, and a template literal in a file of steps is the code's own.
+    const steps = join(scratch, "main-steps.json");
+    writeFileSync(steps, JSON.stringify([{ electron: "const app = 'mine'; `${app} and ${electron.app.getName()}`" }]));
+    assert.match((await lab.tool("run", { session: "app", file: steps })).text, /"mine and fixture"/);
+
+    // What the main process logs counts in checks, as the page's does.
+    const logged = await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => console.error('handler for save failed'), 100); 1" }, { expect: { console: "handler for save failed" } }, { expect: { noErrors: true } }] });
+    assert.match(logged.text, /ok {4}2 expect[\s\S]*FAIL {2}3 expect: expected no console errors or page errors since the page loaded, found 1:\n {4}handler for save failed \(main process\)/);
+    // A check waits for the main process too.
+    const waited = await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => app.ready = true, 200); 1" }, { expect: { electron: "app.ready === true" } }, { expect: { electron: "BrowserWindow.getAllWindows().length > 0", timeout: 300 } }] });
+    assert.match(waited.text, /ok {4}2 expect[\s\S]*FAIL {2}3 expect: expected BrowserWindow\.getAllWindows\(\)\.length > 0 to be truthy in the main process, it was false/);
+
+    // A stub stands in until the session ends, and the original is put back then.
+    const stubbed = await lab.tool("run", { session: "app", steps: [{ electron: "const real = dialog.showMessageBox; stub(dialog, 'showMessageBox', async (options) => ({ response: 1, real: typeof real }))" }, { electron: "await dialog.showMessageBox({ message: 'Sure?' })" }] });
+    assert.match(stubbed.text, /ok {4}1 electron \(\d+ms\)\nok {4}2 electron \(\d+ms\)\n\{\s*"response": 1,\s*"real": "function"\s*\}/);
+    await lab.tool("end", { session: "app" });
+    await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    assert.match(await inMain("[(await dialog.showMessageBox({})).response, typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*0,\s*"undefined"\s*\]/);
+
+    // Two sessions stubbing one thing can end in either order: the app ends up as it was.
+    for (const [first, second, left] of [["app", "other", /"B"/], ["other", "app", /"A"/]] as const) {
+      await lab.tool("new", { name: "other", attach: window.port, inspect: port });
+      await lab.tool("run", { session: "app", steps: [{ electron: "stub(app, 'getName', () => 'A')" }, { electron: "stub(app, 'getName', () => 'B')", on: "other" }] });
+      await lab.tool("end", { session: first });
+      assert.match(await inMain("app.getName()", { session: second }), left);
+      await lab.tool("end", { session: second });
+      await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+      assert.match(await inMain("[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*"fixture",\s*"undefined"\s*\]/);
+    }
+    // A promise the code ends with is awaited, and evaluations side by side keep their own values.
+    assert.match(await inMain("dialog.showMessageBox({})"), /\{\s*"response": 0\s*\}/);
+    const both = await lab.tool("run", { session: "app", steps: [{ playwright: "return Promise.all([electron('[1, 2]'), electron('({ a: 1 })')])" }] });
+    assert.match(both.text, /\[\s*\[\s*1,\s*2\s*\],\s*\{\s*"a": 1\s*\}\s*\]/);
+    // A stub can't stand in for what can't be replaced, and one over a prototype's method leaves no trace.
+    assert.match(await inMain("stub(Object.freeze({ f() {} }), 'f', () => 1)"), /FAIL {2}1 electron: TypeError: stub: f can't be replaced on this object \(it is read-only\)/);
+    // Nor for a name that isn't there, a missing replacement, or a getter and setter it couldn't put back.
+    assert.match(await inMain("stub(dialog, 'showMessageBx', () => 1)"), /stub: showMessageBx isn't on this object\. Check the name/);
+    assert.match(await inMain("stub(dialog, 'showMessageBox')"), /stub: the third argument is the replacement/);
+    assert.match(await inMain("stub(Object.defineProperty({}, 'theme', { get() { return 'light' }, set() {}, configurable: true }), 'theme', 'dark')"), /stub: theme is a getter or setter, which stub can't put back\. Set it directly instead/);
+    // A promise the code ends with that has already failed fails the step, and leaves nothing unhandled in the app.
+    const rejected = await lab.tool("run", { session: "app", steps: [{ electron: "Promise.reject(new Error('nope'))" }] });
+    assert.match(rejected.text, /FAIL {2}1 electron: Error: nope/);
+    assert.match(await inMain("app.getName()"), /"fixture"/);
+    assert.doesNotMatch((await lab.tool("run", { session: "app", steps: [{ wait: 300 }] })).text, /nhandled|PromiseRejectionHandled/);
+    // Node's own warnings are warnings, not errors.
+    const warned = await lab.tool("run", { session: "app", steps: [{ reload: true }, { electron: "process.emitWarning('old api', 'DeprecationWarning', 'DEP0999'); 1" }, { expect: { console: "DeprecationWarning: old api" } }, { expect: { noErrors: true } }] });
+    assert.equal(warned.failed, false, warned.text);
+    await inMain("const Base = class { hi() { return 'base' } }; globalThis.thing = new Base(); stub(thing, 'hi', () => 'stub'); thing.hi()");
+    await lab.tool("end", { session: "app" });
+    await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    assert.match(await inMain("const own = Object.hasOwn(thing, 'hi'); const said = thing.hi(); delete globalThis.thing; [own, said]"), /\[\s*false,\s*"base"\s*\]/);
+    // A SyntaxError the code throws as it runs isn't a mistake in it: a check keeps trying.
+    const parsed = await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => app.json = '{\"done\": true}', 200); app.json = '{'; 1" }, { expect: { electron: "JSON.parse(app.json).done" } }] });
+    assert.match(parsed.text, /ok {4}2 expect/);
+    // A check's own time bounds each try.
+    const begun = Date.now();
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "await new Promise(() => {})", timeout: 300 } }] })).text, /FAIL {2}1 expect/);
+    assert.ok(Date.now() - begun < 4000, `the expect took ${Date.now() - begun}ms`);
+    // Logged errors and dates read as themselves.
+    await inMain("console.log('at', new Error('save failed'), { s: 'x' }); 1");
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { console: "at Error: save failed" } }, { expect: { console: "{ s: 'x' }" } }] })).text, /ok {4}1 expect[\s\S]*ok {4}2 expect/);
+
+    // Truthy as the main process has it.
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "NaN", timeout: 200 } }] })).text, /expected NaN to be truthy in the main process, it was "NaN"/);
+
+    assert.match(await inMain("throw new Error('boom')"), /FAIL {2}1 electron: Error: boom\n/);
+    assert.match(await inMain("throw { code: 42 }"), /FAIL {2}1 electron: threw \{"code":42\}/);
+    // A mistake in the code is said in the app's own words, about the code as written.
+    assert.match(await inMain("app.getName("), /electron: SyntaxError: (missing \) after argument list|Unexpected end of input)/);
+    assert.match(await inMain("return 1"), /Illegal return statement \(an electron step hands back its last statement's value, with no return\)/);
+    // Code that keeps the main process busy is stopped, before an await or after one, and the app goes on.
+    assert.match(await inMain("while (true) {}", { timeout: 500 }), /FAIL {2}1 electron: the code kept the main process busy for 500ms, and was stopped/);
+    assert.match(await inMain("await null; while (true) {}", { timeout: 500 }), /FAIL {2}1 electron: the code kept the main process busy past 500ms, and was stopped/);
+    assert.match(await inMain("app.getName()"), /"fixture"/);
+    // Code that only waits is left to it.
+    assert.match(await inMain("await new Promise(() => {})", { timeout: 300 }), /hadn't settled after 300ms/);
+
+    // An app that exits isn't kept waiting for weblab to let go of it, and the session says it's gone.
+    await inMain("setTimeout(() => process.exit(0), 50); 1");
+    assert.equal(await Promise.race([main.exited.then(() => true), sleep(5000).then(() => false)]), true, "the main process exited");
+    assert.match(await inMain("app.getName()"), /the app's main process went away: it quit or restarted\. End the session and open it again/);
+
+    await lab.tool("new", { name: "plain", attach: window.port });
+    assert.match(await inMain("1", { session: "plain" }), /this session has no main process to run code in\. Open it with inspect/);
+    // So does one whose window went, in the middle of a step and after it, and list says so.
+    const waiting = lab.tool("run", { session: "plain", steps: [{ wait: 5000 }] });
+    await sleep(500);
+    window.stop();
+    assert.match((await waiting).text, /FAIL {2}1 wait: the app this session is attached to went away: it quit or restarted\. End the session and open it again/);
+    assert.match((await lab.tool("run", { session: "plain", steps: [{ js: "1" }] })).text, /the app this session is attached to went away: it quit or restarted\. End the session and open it again/);
+    assert.match((await lab.tool("list")).text, /plain {2}attached to \d+ {2}\(gone: the app quit or restarted\)/);
+
+    await lab.tool("end");
+    await lab.close();
+  } finally {
+    await main.stop();
+    await stranger.stop();
+    window.stop();
   }
 });
 

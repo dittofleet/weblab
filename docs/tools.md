@@ -21,6 +21,7 @@ Opens a session: a browser of its own (its own cookies, storage and tabs) pointi
 | `attach` | Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. See [attach](#attach). | Launch a browser |
 | `tab` | With `attach`: which tab to drive, by part of its URL or title. | The first tab |
 | `newTab` | With `attach`: open a new tab to drive, and leave the browser's own tabs alone. | `false` |
+| `inspect` | With `attach` to an Electron app: the port or address of its main process's Node debugger, from `--inspect`. Needed for [`electron`](code.md#electron-the-apps-main-process) steps. | none |
 | `browser` | The browser to launch: `chrome`, `chrome-beta`, `chrome-dev`, `chrome-canary`, `edge`, `edge-beta`, `edge-dev`, `chromium`, `brave`, `helium`, `vivaldi`, `arc`, `opera`, the name of any app in `/Applications` or `~/Applications`, or the path to a binary or `.app`. `webkit` (or `safari`) and `firefox` are Playwright's own builds of those engines. | `chrome` |
 | `browserArgs` | Extra command-line flags for the browser it launches. | none |
 | `headed` | Give the browser a window on the screen. | `false` (headless) |
@@ -34,7 +35,7 @@ Opens a session: a browser of its own (its own cookies, storage and tabs) pointi
 | `ready` | What `goto`, `reload`, the `ready` step and a `video` starting wait for: `{ "selector" }`, `{ "text" }` or `{ "js" }` (an expression that turns true), each with an optional `timeout`. | `#root` or `#app` has children, or else the page has loaded |
 | `out` | The directory this session's screenshots, logs and videos go to. | A shared directory under the temp directory; see [Files](#files) |
 
-Some combinations are refused with a message saying why: `tab` and `newTab` need `attach`; `browser`, `browserArgs`, `persist`, `state`, `context` and `headed` can't be used with `attach`; `persist` and `state` can't be used together; a name that is already open is refused until that session ends.
+Some combinations are refused with a message saying why: `tab`, `newTab` and `inspect` need `attach`; `browser`, `browserArgs`, `persist`, `state`, `context` and `headed` can't be used with `attach`; `persist` and `state` can't be used together; a name that is already open is refused until that session ends.
 
 ### What `new` replies
 
@@ -50,7 +51,7 @@ console since the last reply:
   [console.log] app mounted (http://localhost:5173/src/main.tsx)
 ```
 
-- The first line names the session and its address. `(server started by weblab: ...)` is there when the server is one weblab started, in this process or another. An attached session says `attached to 9222`, and `, at <address>` when it was given one.
+- The first line names the session and its address. `(server started by weblab: ...)` is there when the server is one weblab started, in this process or another. An attached session says `attached to 9222`, then `, main process at 9229` when it was given `inspect`, and `, at <address>` when it was given one.
 - `files` is the directory the session writes to.
 - Lines about the server follow, when there is something to say: that weblab started it, is waiting for another weblab that is starting it, or is keeping track of one that went into the background.
 - The first `goto` is reported as step 1, as a `run` reports steps.
@@ -88,8 +89,10 @@ The project is the nearest directory at or above `dir` with a `package.json`, lo
 - It stays where it is: with no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one is given, else against the page's current origin, an Electron app's own scheme (`myapp://`) included.
 - No server is started unless `address` or `start` is given.
 - `viewport` resizes the tab only when given.
+- If the browser or app quits or restarts, the next step on the session says it went away, and `list` marks the session `(gone: the app quit or restarted)`. The session then has to be ended and opened again.
 - When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups) and lets go of the browser, which keeps running.
 - A `video` step records the tab being driven, once it is ready: an app still loading isn't filmed blank.
+- With `inspect`, the session joins the Electron app's main process as well, and the reply to `new` says `main process at 9229`. The port is checked right away. It is refused if it is a Chromium debugging port, a Node process other than an Electron app, or the main process of a different app from the one attached.
 
 [Sessions](sessions.md#running-browsers-and-electron-apps) has more, including how to start a browser or app with a port.
 
@@ -141,7 +144,7 @@ In order, a reply holds:
 5. `shot  <path>` for each screenshot, and `file  <path>` for other files the steps wrote (a named `look`, a video `stop` wrote).
 6. `url` and `title`, when they changed since the last reply about this session.
 7. The tabs, as `tab 0* <url>`, `tab 1  <url>` (the `*` marks the one steps act on), when there is more than one and they changed.
-8. `console since the last reply:` and what the page logged since then: console messages, page errors, failed requests, responses with an error status, and dialogs. At most the last 40 lines are shown, with the path of the full log when there were more. The same line repeated shows once with a count, `(x12)`.
+8. `console since the last reply:` and what the page logged since then: console messages, page errors, failed requests, responses with an error status, and dialogs. With `inspect`, what the app's main process logged is there too, as `[main console.log] ...`. At most the last 40 lines are shown, with the path of the full log when there were more. The same line repeated shows once with a count, `(x12)`.
 
 Each screenshot comes back as an image, placed right after the lines of the step that took it, so several in one reply are told apart. Up to six per reply are sent, leaving out any over 4 MB; their paths are in the text either way.
 

@@ -2,7 +2,7 @@
 
 This is the reference for every step `run` takes: what each does, its forms and options, how steps name elements, and how steps are reused with `include` and placeholders. The `run` tool's own description lists the same steps in one line each.
 
-Most steps are shortcuts for what is done all the time. Four run code (`js`, `css`, `playwright`, `cdp`), and with those anything a browser can do is in reach; see [Code](code.md).
+Most steps are shortcuts for what is done all the time. Five of them run code (`js`, `css`, `playwright`, `cdp`, and `electron` in an Electron app's main process), and with those anything a browser can do is in reach. [Code](code.md) covers them.
 
 | Group | Steps |
 | --- | --- |
@@ -168,9 +168,10 @@ A path in a step (`upload`, a `js` or `playwright` file, a shot's `matches`) is 
 | `{ ...target, "enabled": true }` | The element is enabled (or, with `false`, disabled). |
 | `{ "url": "/cart" }`, `{ "title": "Cart" }` | The page's URL or title matches (see [Matching](#matching)). |
 | `{ "request": "**/api/save", "status": 200 }` | The page has had a response from a matching URL since it loaded, with that status if one is given. If none matches, the failure lists the responses that came closest. |
-| `{ "console": "loaded" }` | The page has logged a matching console message since it loaded. |
-| `{ "noErrors": true }` | The page has logged no console errors and thrown no errors since it loaded, past the session's `ignore`. Checked once, not retried. An error a `mock` caused on purpose doesn't count. |
+| `{ "console": "loaded" }` | The page has logged a matching console message since it loaded. With `inspect`, what the app's main process logged counts too. |
+| `{ "noErrors": true }` | The page has logged no console errors and thrown no errors since it loaded, past the session's `ignore`. With `inspect`, the main process's console errors count too. Checked once, not retried. An error a `mock` caused on purpose doesn't count. |
 | `{ "js": "expression" }` | The expression is truthy in the page. If it never is, the failure says what it was. |
+| `{ "electron": "code" }` | The code is truthy in the app's main process, run as the [`electron`](code.md#electron-the-apps-main-process) step runs it. Needs `inspect`. If it never is, the failure says what it was. |
 
 "Since it loaded" means since the tab last loaded a document: a `goto` or a reload starts afresh, and a route change inside a single-page app doesn't. To check that one action caused one request, use code: see [Recipes](recipes.md#check-that-nothing-errored-and-that-the-app-called-its-api).
 
@@ -274,6 +275,7 @@ file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
 | `css` | `"css"` | Adds a stylesheet to the page, kept through reloads and new tabs for the rest of the session. |
 | `playwright` | `"code"` or `{ file }` | Runs Playwright code against the page and hands back what it returns. |
 | `cdp` | `"Domain.method"` or `{ method, params }` | Sends one raw Chrome DevTools Protocol command and hands back its result. Chromium browsers only. |
+| `electron` | `"code"` or `{ file }` | Runs JavaScript in an attached Electron app's main process and hands back its value. Needs `inspect`. |
 
 [Code](code.md) covers what each is handed, and what they make possible.
 

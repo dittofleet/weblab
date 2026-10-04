@@ -67,7 +67,7 @@ async function visibleText(page: Page, text: string, exact?: boolean): Promise<n
  * timeout runs out; `once` marks a check nothing in the page can
  * change, so it is tried a single time.
  */
-type ExpectationBuilder = (ctx: ActionContext, args: any) => {
+type ExpectationBuilder = (ctx: ActionContext, args: any, timeout?: number) => {
   holds(): Promise<boolean>;
   wanted(): string;
   once?: boolean;
@@ -192,23 +192,20 @@ const EXPECTATIONS: Expectation[] = [
   ],
   [
     "js",
-    ({ page }, { js }) => {
-      let found: unknown;
-      // An expression that throws isn't true yet, and may be once the page has caught up; what it threw is said if it never is.
-      let threw: string | undefined;
-      return {
-        holds: async () => {
-          try {
-            found = await page.evaluate(js);
-            threw = undefined;
-          } catch (error) {
-            threw = briefError(error).replace(/^page\.evaluate: /, "");
-            return false;
-          }
-          return Boolean(found);
-        },
-        wanted: () => (threw === undefined ? `${short(js)} to be truthy, it was ${short(JSON.stringify(found) ?? String(found))}` : `${short(js)} to be truthy, but it threw: ${threw}`),
-      };
+    ({ page }, { js }) =>
+      truthyCheck(js, "", async () => {
+        const value = await page.evaluate(js);
+        return { value, truthy: Boolean(value) };
+      }),
+  ],
+  [
+    "electron",
+    (ctx, { electron: code }, timeout = ctx.timeout) => {
+      if (typeof code !== "string") bad("expect", `{ "electron": "JavaScript that turns true in the main process" }`);
+      // Each try gets what is left of the expect's time, so one that hangs doesn't outlast it.
+      const deadline = Date.now() + timeout;
+      // Truthy as the main process has it: NaN there is falsy, though it comes back as "NaN".
+      return truthyCheck(code, " in the main process", () => ctx.mainProcess().evaluate(code, Math.max(100, deadline - Date.now())));
     },
   ],
   [
@@ -247,7 +244,7 @@ const EXPECTATIONS: Expectation[] = [
         holds: async () => errors().length === 0,
         wanted: () => {
           const found = errors();
-          const lines = found.slice(0, 5).map((entry) => `    ${short(entry.text)}${entry.url ? ` (${entry.url})` : ""}`);
+          const lines = found.slice(0, 5).map((entry) => `    ${short(entry.text)}${entry.process === "main" ? " (main process)" : entry.url ? ` (${entry.url})` : ""}`);
           const more = found.length > 5 ? [`    and ${found.length - 5} more, in the console log`] : [];
           return `no console errors or page errors since the page loaded, found ${found.length}:\n${[...lines, ...more].join("\n")}`;
         },
@@ -256,6 +253,29 @@ const EXPECTATIONS: Expectation[] = [
     },
   ],
 ];
+
+// Code that should turn truthy where `evaluate` runs it. Code that
+// throws isn't true yet, and may be once the app has caught up. What it
+// threw is said if it never is. A mistake in it is refused at once.
+function truthyCheck(code: string, where: string, evaluate: () => Promise<{ value: unknown; truthy: boolean }>): ReturnType<ExpectationBuilder> {
+  let found: unknown;
+  let threw: string | undefined;
+  return {
+    holds: async () => {
+      try {
+        const { value, truthy } = await evaluate();
+        found = value;
+        threw = undefined;
+        return truthy;
+      } catch (error) {
+        if (error instanceof UsageError) throw error;
+        threw = briefError(error).replace(/^page\.evaluate: /, "");
+        return false;
+      }
+    },
+    wanted: () => `${short(code)} to be truthy${where}, ${threw === undefined ? `it was ${short(JSON.stringify(found) ?? String(found))}` : `but it threw: ${threw}`}`,
+  };
+}
 
 // `text` beside another way of naming an element is what that element
 // should contain; alone (or with only `exact`) it is text on the page.
@@ -322,7 +342,7 @@ export const checkSteps: Record<string, Action> = {
       const forms = [...EXPECTATIONS.map(([key, , shape]) => shape ?? key), "text | target + text", "target"];
       return bad("expect", `text that should be visible, or { ${forms.join(" | ")} }`);
     }
-    const { holds, wanted, once } = build(ctx, check);
+    const { holds, wanted, once } = build(ctx, check, timeout ?? ctx.timeout);
     const ok = once ? await holds() : await poll(holds, timeout ?? ctx.timeout);
     if (!ok) ctx.fail(message ?? `expected ${wanted()}`);
   },

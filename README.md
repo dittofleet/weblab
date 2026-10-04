@@ -85,7 +85,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 
 - Start the app's dev server when nothing answers at its address, share it among every session pointing there, and stop it when the last one ends. A server it didn't start is used as it is and left running.
 - Run any number of sessions at once: two users, copies of an app on several ports, Chrome, Edge, WebKit and Firefox side by side.
-- Join a browser or Electron app that is already running, and leave it as it was found.
+- Join a browser or Electron app that is already running, and leave it as it was found. Run code in an Electron app's main process too.
 - Read the page as an accessibility tree with refs to act on, as text, or as HTML.
 - Act and check: click, type, fill, drag, upload, and `expect` waits for text, elements, URLs, requests, console messages or any JavaScript.
 - Shape what the page sees: fake API responses, colour scheme, viewport, locale, a saved sign-in, a slow network.
@@ -99,7 +99,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 | [Tools](docs/tools.md) | Every argument of `new`, `run`, `end`, `list` and `docs`, what each reply holds, servers, attaching, long runs, and where files go. |
 | [Steps](docs/steps.md) | Every step and its options, targeting elements, refs, `expect`, `include` and placeholders. |
 | [Sessions](docs/sessions.md) | More than one session: two users, copies of an app, running browsers and Electron apps, other engines, saved sign-ins. |
-| [Code](docs/code.md) | `js`, `css`, `playwright` and `cdp`, and step files written as code. |
+| [Code](docs/code.md) | `js`, `css`, `playwright`, `cdp` and `electron`, and step files written as code. |
 | [Recipes](docs/recipes.md) | Short answers to common tasks, as the steps to run. |
 
 ## Development

@@ -10,6 +10,7 @@
 // attached browser.
 import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { browserProcess } from "./browser.ts";
 import { briefError } from "./errors.ts";
 import type { ActionContext } from "./types.ts";
 import { tryExec } from "./util.ts";
@@ -131,21 +132,6 @@ JSON.stringify(ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo
 
 const windowsOnScreen = (ctx: ActionContext): OnScreen[] => JSON.parse(jxa(ctx, "the windows on screen couldn't be listed", LIST_WINDOWS));
 
-// The browser's own process, which owns its window and the menus it
-// opens. Null when the browser can't be asked (a kept profile).
-async function browserPid(ctx: ActionContext): Promise<number | null> {
-  const browser = ctx.context.browser();
-  if (browser === null) return null;
-  try {
-    const session = await browser.newBrowserCDPSession();
-    const { processInfo } = (await session.send("SystemInfo.getProcessInfo")) as { processInfo: { type: string; id: number }[] };
-    await session.detach().catch(() => {});
-    return processInfo.find((process) => process.type === "browser")?.id ?? null;
-  } catch {
-    return null;
-  }
-}
-
 // Cuts a picture down to one rectangle of it, in pixels from its top left.
 const CROP = `ObjC.import("AppKit");
 function run([file, x, y, width, height]) {
@@ -188,7 +174,7 @@ async function windowBounds(ctx: ActionContext): Promise<Rect> {
 // The browser's window, with the menus it has open over it, and nothing
 // else: asked for by window, it comes whole even from under another.
 async function captureWindow(ctx: ActionContext, path: string, bounds: Rect, part: Rect | null): Promise<void> {
-  const pid = await browserPid(ctx);
+  const pid = await browserProcess(ctx.context);
   const onScreen = windowsOnScreen(ctx);
   const window = onScreen.find((w) => w.layer === 0 && (pid === null || w.pid === pid) && sameRect(w.bounds, bounds));
   if (window === undefined) {

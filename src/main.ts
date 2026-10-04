@@ -24,6 +24,11 @@ Its tools: new (open a session), run (run steps on one), end, list, docs.
   weblab update      install the latest release
   weblab --version   print this one's version`;
 
+// A weblab started from an Electron app (an editor, an agent's host)
+// inherits ELECTRON_RUN_AS_NODE, which means nothing to weblab and would
+// make an Electron app it starts run as plain Node.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 const [flag] = process.argv.slice(2);
 if (flag === "--version" || flag === "-v") {
   console.log(manifest.version);

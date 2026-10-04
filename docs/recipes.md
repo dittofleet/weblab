@@ -26,6 +26,7 @@ Many recipes use the [code steps](code.md). That is deliberate: when no named st
 - [Popups and new tabs](#popups-and-new-tabs)
 - [Use a server you started yourself](#use-a-server-you-started-yourself)
 - [Drive an Electron app](#drive-an-electron-app)
+- [Get past an Electron app's native dialogs, offline](#get-past-an-electron-apps-native-dialogs-offline)
 - [Test two users or two devices at once](#test-two-users-or-two-devices-at-once)
 - [Ask a running app one thing](#ask-a-running-app-one-thing)
 - [Run something long](#run-something-long)
@@ -523,7 +524,36 @@ Start the app with a debugging port, then attach:
 
 An app just started may still be loading, a fresh dev build especially. `{ "ready": true }` waits for it to show something, and `{ "video": "start" }` waits the same way before it records.
 
-An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
+An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. If the app is also started with `--inspect=9229` and the session opened with `"inspect": 9229`, steps can run code in its main process. `{ "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: true }))" }` answers its native file dialogs until the session ends. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
+
+## Get past an Electron app's native dialogs, offline
+
+No step can click a native file picker or message box, and a flow that downloads something needs the network. Both can be handled from the app's main process. Here weblab starts the app with both ports, and stops it when the session ends:
+
+`new`
+
+```json
+{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+```
+
+`run`
+
+```json
+{
+  "session": "app",
+  "steps": [
+    { "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: false, filePaths: ['/tmp/fixture/library'] }))" },
+    { "electron": "stub(shell, 'openExternal', async (url) => console.log('would open', url))" },
+    { "electron": "const real = globalThis.fetch; stub(globalThis, 'fetch', async (url, init) => String(url).includes('/catalog') ? Response.json({ items: [] }) : real(url, init))" },
+    { "click": "text=Choose folder" },
+    { "expect": "library" },
+    { "expect": { "electron": "require('fs').existsSync('/tmp/fixture/library/index.json')" } },
+    { "expect": { "noErrors": true } }
+  ]
+}
+```
+
+The stubs are put back when the session ends. `noErrors` covers errors from the main process too. [Code](code.md#electron-the-apps-main-process) has more on what the main process can do.
 
 ## Test two users or two devices at once
 
