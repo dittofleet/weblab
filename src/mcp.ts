@@ -237,16 +237,16 @@ const sessionOptions = z.object({
   state: z.string().optional().describe("Start signed in: the name a saveState step saved cookies and storage under."),
   viewport: viewport.optional().describe("The page's size (default: 1440x900 at 2x)."),
   context: z.record(z.string(), z.unknown()).optional().describe(`Playwright browser context options, as given: { "colorScheme": "dark", "locale": "de-DE", "isMobile": true, "permissions": [...], ... }`),
-  video: z.boolean().optional().describe("Record the session; the video is written when it ends."),
   trace: z.union([z.boolean(), z.literal("on-failure")]).optional().describe(`Keep a Playwright trace, written when the session ends: true, or "on-failure" to keep it only if a step failed.`),
   timeout: z.number().optional().describe("How long each step may take, in milliseconds, unless the run or the step says (default: 10000)."),
   ignore: z.array(z.string()).optional().describe("Console output and failed requests matching these regular expressions are left out of the console log and of error checks."),
   ready: z
     .object({ selector: z.string().optional(), text: z.string().optional(), js: z.string().optional(), timeout: z.number().optional() })
     .optional()
-    .describe("What goto waits for before the next step: an element, some text, or a JavaScript expression that turns true (default: #root or #app has children, or the page has loaded)."),
+    .describe("What goto, ready and video wait for: an element, some text, or a JavaScript expression that turns true (default: #root or #app has children, or the page has loaded)."),
   out: z.string().optional().describe("The directory its screenshots, logs and videos go to (default: one under the system's temp directory, shared by this weblab's sessions)."),
-});
+  // Kept, rather than dropped, so an option new doesn't take is refused by name.
+}).loose();
 
 const step = z.record(z.string(), z.unknown());
 
@@ -393,14 +393,14 @@ export function createServer(version: string): McpServer {
     {
       title: "End session",
       description:
-        "End a session: its browser closes, its video and trace are written, and a server weblab started for it stops if no other session is using it. With no session named, ends every session.",
+        "End a session: its browser closes, a video still being recorded and its trace are written, and a server weblab started for it stops if no other session is using it. With no session named, ends every session.",
       inputSchema: z.object({ session: z.string().optional().describe("The session to end (default: all of them).") }),
     },
     ({ session: name }) =>
       answering(async () => {
         if (name === undefined && names().length === 0) return result(["no session is open"]);
         const dirs = new Set((name === undefined ? names() : [name]).filter(has).map((one) => session(one).dir));
-        // As part of a job, so what ending leaves (a second tab's video) is told too.
+        // As part of a job, so what ending says (an mp4 that wasn't written) is told too.
         const job = newJob(name ?? "");
         const ended: Ended[] = await within(job, async () => (name === undefined ? endAll() : [await end(name)]));
         for (const one of ended) {

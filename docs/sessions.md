@@ -56,7 +56,7 @@ A [`new` step](steps.md#more-than-one-session) opens a session in the middle of 
 | The project (`dir`), where files go (`out`), and the address it is pointed at, or, for a session attached to a browser, the `http` or `https` site its page is on | `name` |
 | `start`, `startTimeout` and `ready` | `attach`, `tab`, `newTab` |
 | `browser`, `browserArgs` and `headed` | `state` and `persist`: a second session is a second user |
-| `viewport`, `timeout`, `ignore`, `video` and `trace` | `path`: it goes to `/` unless the step says |
+| `viewport`, `timeout`, `ignore` and `trace` | `path`: it goes to `/` unless the step says |
 | `context`, with the step's own keys laid over it | |
 
 A `new` step that gives `attach` takes nothing but the project and where files go.
@@ -175,7 +175,7 @@ title My App
 - **It isn't a clean slate.** Cookies, storage and whatever the app has open are real, which is the point, and a step can change them.
 - **Some options don't apply**, because they describe a browser weblab would launch: `browser`, `browserArgs`, `persist`, `state`, `context` and `headed` are refused. `viewport` resizes the tab only when given.
 - **It has a window**, so [`screen` shots](steps.md#the-real-screen) capture its native menus.
-- **`video` records the tab being driven**, from when the session attaches, with the drawn cursor.
+- **A [`video`](steps.md#recording-a-video) records the tab being driven**, with the drawn cursor. It starts once the app is ready, so a window still loading a fresh dev build isn't filmed blank; a [`ready`](steps.md#getting-around) step waits for the same without recording.
 - **Two sessions can join the same tab.** Each drives it, so a step on one shows on the other; the reply to the second `new` says so. Give `tab` or `newTab` to drive another.
 - **It is left as it was found.** When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups), and lets go. The browser and its own tabs keep running.
 

@@ -13,11 +13,20 @@ const defaultReady = () => {
 };
 const READY_TIMEOUT = 60_000;
 
-/** Waits for what the session says "ready" means (its `ready` option), or the default. */
-async function appReady(ctx: ActionContext, given: Ready | false | undefined): Promise<void> {
+export const READY_KEYS = ["selector", "text", "js", "timeout"];
+
+/** What a step was given as `ready`: false, true for the session's own, or { selector | text | js, timeout }. */
+export function readyArg(action: string, given: unknown): Ready | false | undefined {
+  if (given === undefined || given === true) return undefined;
+  if (given === false) return false;
+  const ready = isObject(given) ? (given as Ready) : null;
+  if (ready === null || Object.keys(ready).some((key) => !READY_KEYS.includes(key))) bad(action, `ready to be true, false, or { selector | text | js, timeout }`);
+  return ready;
+}
+
+/** Waits for what the session says "ready" means (its `ready` option), or the default, on whatever page the tab is on. */
+export async function waitReady(ctx: ActionContext, given: Ready | false | undefined): Promise<void> {
   if (given === false) return;
-  // A page that left the app (a redirect elsewhere) is not the app to wait for.
-  if (ctx.origin !== "" && !ctx.page.url().startsWith(ctx.origin)) return;
   const ready = given ?? ctx.app.settings.ready ?? {};
   // A cold dev server can take a while, so ready gets at least a minute.
   const timeout = ready.timeout ?? Math.max(ctx.timeout, READY_TIMEOUT);
@@ -40,6 +49,12 @@ async function appReady(ctx: ActionContext, given: Ready | false | undefined): P
   }
   // A beat for whatever the app does the moment it mounts.
   await ctx.page.waitForTimeout(250);
+}
+
+// After going somewhere: a page that left the app (a redirect elsewhere) is not the app to wait for.
+async function appReady(ctx: ActionContext, given: Ready | false | undefined): Promise<void> {
+  if (ctx.origin !== "" && !ctx.page.url().startsWith(ctx.origin)) return;
+  await waitReady(ctx, given);
 }
 
 /** A path is resolved against the app's origin; a full URL stands as it is. */
@@ -71,19 +86,25 @@ function visitedTabs(ctx: ActionContext): WeakSet<object> {
 
 export const navigationSteps: Record<string, Action> = {
   goto: step(`open a path or URL, then wait for the app to be ready: "/path" or { url, ready }`, async (ctx, args) => {
-    const { url, ready } = arg<{ url: string; ready?: Ready | false }>(args, "url", "goto");
+    const { url, ready } = arg<{ url: string; ready?: unknown }>(args, "url", "goto");
     if (typeof url !== "string") bad("goto", `a path or URL, or { url, ready }`);
     const response = await ctx.page.goto(absolute(ctx, url, "goto"), { waitUntil: "load" });
     // The page loaded, but as an error page: worth knowing before trusting a screenshot of it.
     if (response !== null && response.status() >= 400) ctx.note(`${url} answered ${response.status()}`);
-    await appReady(ctx, ready);
+    await appReady(ctx, readyArg("goto", ready));
     await centerMouse(ctx);
   }),
 
   reload: step("reload, then wait for the app to be ready: true or { ready }", async (ctx, args) => {
     if (args !== true && args !== undefined && !isObject(args)) bad("reload", "no argument, or { ready }");
     await ctx.page.reload({ waitUntil: "load" });
-    await appReady(ctx, isObject(args) ? (args.ready as Ready | false) : undefined);
+    await appReady(ctx, isObject(args) ? readyArg("reload", args.ready) : undefined);
+  }),
+
+  ready: step(`wait for the app to be ready, without going anywhere: true, or { selector | text | js, timeout }`, async (ctx, args) => {
+    if (args !== true && !isObject(args)) bad("ready", "true, or { selector | text | js, timeout }");
+    // A page still loading (a cold dev build, an app's window just opened) is waited for as goto would.
+    await waitReady(ctx, readyArg("ready", args));
   }),
 
   back: step("go back in the tab's history", async (ctx) => {
@@ -116,6 +137,7 @@ export const navigationSteps: Record<string, Action> = {
     } else if (isObject(args) && args.close !== undefined) {
       const closing = typeof args.close === "number" ? pages()[args.close] : ctx.page;
       if (closing === undefined) ctx.fail(`there is no tab ${args.close}`);
+      await ctx.film.closing(closing);
       await closing.close();
       if (closing === ctx.page) ctx.page = pages().at(-1) ?? ctx.fail("the last tab was closed");
     } else if (args === "new") {
@@ -131,6 +153,8 @@ export const navigationSteps: Record<string, Action> = {
     }
     visited.add(ctx.page);
     await ctx.page.bringToFront();
+    // A take being recorded follows the steps to this tab.
+    await ctx.film.follow(ctx.page);
   }),
 
   viewport: step(`resize the page: { width, height } or "800x600"`, async (ctx, args) => {

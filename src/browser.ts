@@ -18,7 +18,6 @@ type ContextOptions = {
   /** True when the session chose a pixel scale, rather than taking the default. */
   scaleGiven?: boolean;
   settings?: ContextSettings;
-  videoDir?: string;
 };
 
 type Opened = {
@@ -29,7 +28,7 @@ type Opened = {
 };
 
 export type BrowserManager = {
-  /** A context for one session. `close` also finalizes its video. */
+  /** A context for one session. */
   open(options: ContextOptions): Promise<Opened>;
   close(): Promise<void>;
   /** True when weblab joined a browser that was already running, and so must leave it as it found it. */
@@ -230,16 +229,13 @@ export function createBrowserManager(app: App, options: { headed: boolean }): Br
     handleSIGTERM: false,
     handleSIGHUP: false,
   };
-  const contextOptions = ({ viewport, scaleGiven, settings, videoDir }: ContextOptions) => ({
+  const contextOptions = ({ viewport, scaleGiven, settings }: ContextOptions) => ({
     ...settings,
     viewport: { width: viewport.width, height: viewport.height },
     // A window on a real display keeps that display's own scale unless
     // one is asked for: what the OS draws over the page (a menu, a
     // tooltip) is drawn at the display's scale, and wouldn't line up.
     ...(options.headed && !scaleGiven ? {} : { deviceScaleFactor: viewport.deviceScaleFactor }),
-    ...(videoDir === undefined
-      ? {}
-      : { recordVideo: { dir: videoDir, size: { width: viewport.width, height: viewport.height } } }),
   });
 
   // The opt-in profile keeps what an app caches in the browser (a

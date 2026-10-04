@@ -1,4 +1,5 @@
 import type { BrowserContext, Locator, Page } from "playwright-core";
+import type { Film } from "./film.ts";
 
 export type Viewport = {
   width: number;
@@ -85,8 +86,10 @@ export type ActionContext = {
   timeout: number;
   /** True when the browser has a window on the screen (headed, or attached), which a capture of the screen needs. */
   windowed: boolean;
-  /** True when the session is being recorded, so pointer actions glide. */
-  video: boolean;
+  /** True while the session is being recorded (the video step), so pointer actions glide. */
+  readonly video: boolean;
+  /** Recording the tab steps act on: what the video step starts and stops. */
+  film: Film;
   /** Where the drawn cursor last was. */
   mouse: { x: number; y: number };
   artifacts: {
@@ -168,7 +171,6 @@ export type SessionOptions = {
   state?: string;
   viewport?: string | Partial<Viewport>;
   context?: ContextSettings;
-  video?: boolean;
   trace?: boolean | "on-failure";
   timeout?: number;
   ignore?: string[];

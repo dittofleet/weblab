@@ -43,6 +43,12 @@ export const CURSOR = () => {
   addEventListener("mouseup", scale(""), true);
 };
 
+/** Takes the cursor out of the page again, so a later take can put it back. */
+export const REMOVE_CURSOR = () => {
+  document.querySelector("[data-weblab-cursor]")?.remove();
+  delete (window as { __weblabCursor?: boolean }).__weblabCursor;
+};
+
 /**
  * Takes a picture without the drawn cursor in it: the dot is for the
  * recording, and in a screenshot it only hides what is under it.

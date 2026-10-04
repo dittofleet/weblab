@@ -4,7 +4,7 @@
 import type { Action, SessionOptions } from "../types.ts";
 import { bad, isObject, step } from "./args.ts";
 
-export const SESSION_KEYS = ["name", "dir", "address", "start", "startTimeout", "path", "attach", "tab", "newTab", "browser", "browserArgs", "headed", "persist", "state", "viewport", "context", "video", "trace", "timeout", "ignore", "ready", "out"];
+export const SESSION_KEYS = ["name", "dir", "address", "start", "startTimeout", "path", "attach", "tab", "newTab", "browser", "browserArgs", "headed", "persist", "state", "viewport", "context", "trace", "timeout", "ignore", "ready", "out"];
 
 export const sessionSteps: Record<string, Action> = {
   new: step(`open another session, as the new tool does; what isn't said is as the session the step is on: "name" or { name, address, start, attach, state, viewport, ... }`, async (ctx, args) => {

@@ -424,26 +424,27 @@ To compare a page's content rather than its pixels, keep a named `look` in each 
 
 ## Record a demo video
 
+Open a session at the size the video should be, set up whatever comes before the part worth showing, then record that part:
+
 `new`
 
 ```json
-{ "name": "demo", "video": true, "viewport": "1280x800@2" }
+{ "name": "demo", "viewport": "1280x800@2" }
 ```
 
-Run the steps, then end the session; the video is written then:
-
-`end`
+`run`
 
 ```json
-{ "session": "demo" }
+{ "session": "demo", "steps": [{ "goto": "/settings" }, { "video": { "as": "dark-mode" } }, { "click": { "label": "Dark mode" } }, { "expect": "Saved" }, { "video": "stop" }] }
 ```
 
 ```text
-ended demo
-video $TMPDIR/weblab/shop-20261003-101600/videos/demo.webm
+...
+ok    5 video (2102ms)
+file  $TMPDIR/weblab/shop-20261003-101600/videos/demo-dark-mode.webm
 ```
 
-A headless browser has no pointer of its own, so weblab draws a cursor that glides to each click, types at a readable pace, and pauses after each action so the video can be followed. With `FFMPEG` set to an ffmpeg binary, an `.mp4` lands beside the `.webm`. A session attached to a running browser or app records the tab it drives, from when it attaches.
+The video starts once the app is ready, never on a page still loading. A headless browser has no pointer of its own, so while recording weblab draws a cursor that glides to each click, types at a readable pace, and pauses after each action so the video can be followed; steps before `start` run at full speed. With `FFMPEG` set to an ffmpeg binary, an `.mp4` lands beside the `.webm`. A session attached to a running browser or app records the tab it drives the same way. [Steps](steps.md#recording-a-video) has the rest.
 
 ## Upload and download files
 
@@ -519,6 +520,8 @@ Start the app with a debugging port, then attach:
 ```json
 { "session": "app", "steps": [{ "look": true }, { "js": "window.api.status()" }] }
 ```
+
+An app just started may still be loading, a fresh dev build especially. `{ "ready": true }` waits for it to show something, and `{ "video": "start" }` waits the same way before it records.
 
 An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
 
