@@ -44,7 +44,7 @@ const BLOCKED = /intercepts pointer events$|^element is not |^element is outside
 
 /**
  * A failed step's reason. Playwright puts what it was doing in a call
- * log under its first line, so its errors are said in one line; a
+ * log under its first line, so its errors are said in one line. A
  * timeout is only useful with the element it was waiting for, so that
  * comes along. Any other error is said whole, less stack lines.
  */
