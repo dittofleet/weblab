@@ -4,7 +4,7 @@
 // network logs, and is kept for checks and code to ask about.
 import { appendFileSync, writeFileSync } from "node:fs";
 import type { BrowserContext, ConsoleMessage, Dialog, Page, Request, Response, WebError, WebSocket } from "playwright-core";
-import { stripAnsi, UsageError } from "./errors.ts";
+import { cut, stripAnsi, UsageError } from "./errors.ts";
 import type { ConsoleEntry, ResponseEntry } from "./types.ts";
 
 /** Counts of console errors, page errors and failed requests. */
@@ -15,9 +15,6 @@ export type ErrorCounts = { console: number; page: number; request: number };
 const MAX_CONSOLE_LINE = 1000;
 // What every dev server says on every page load, and nobody needs to read.
 const ALWAYS_IGNORED = [/^\[console\.debug\] \[vite\] connect(ing|ed)/];
-
-const cut = (text: string, max: number) =>
-  text.length <= max ? text : `${text.slice(0, max)}... (${text.length - max} more characters)`;
 
 // A console message as the browser would show it: `%s` and its kin
 // filled in from the arguments, `%c` styling dropped, colour codes gone.

@@ -697,7 +697,10 @@ export async function runStep(job: Job, given: Step): Promise<{ ok: boolean; rec
     const message = `${on}${within}${entry.error ?? stepError(error)}`;
     entry.error = message;
     // A step written wrong says nothing about the page: no picture, and the session's record is clean.
-    if (error instanceof UsageError) return { ok: false, record: entry };
+    if (error instanceof UsageError) {
+      entry.refused = true;
+      return { ok: false, record: entry };
+    }
     if (where !== undefined && drivers.get(where.name) === where) {
       where.failed = true;
       // One line, so it never shows among the page's own console output.
