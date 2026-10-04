@@ -3,7 +3,7 @@
 // no element to name.
 import type { Locator } from "playwright-core";
 import type { Action, ActionContext } from "../types.ts";
-import { arg, bad, isObject, pick, step } from "./args.ts";
+import { arg, bad, isObject, pick } from "./args.ts";
 import { hasTarget, locate } from "./target.ts";
 
 type Point = { x: number; y: number };
@@ -48,7 +48,7 @@ const pointerOptions = (args: unknown, keys = ["button", "modifiers", "position"
 const front = (ctx: ActionContext) => (ctx.windowed ? ctx.page.bringToFront().catch(() => {}) : undefined);
 
 export const inputSteps: Record<string, Action> = {
-  click: step("click an element or a point: target or { x, y }, plus button, count, modifiers", async (ctx, args) => {
+  click: async (ctx, args) => {
     const clickCount = isObject(args) ? (args.count as number | undefined) : undefined;
     await front(ctx);
     if (isPoint(args) && !hasTarget(args)) {
@@ -60,9 +60,9 @@ export const inputSteps: Record<string, Action> = {
       await target.click({ ...pointerOptions(args), clickCount });
     }
     await settle(ctx);
-  }),
+  },
 
-  hover: step("move the pointer over an element or a point: target or { x, y }", async (ctx, args) => {
+  hover: async (ctx, args) => {
     if (isPoint(args) && !hasTarget(args)) {
       await glide(ctx, args);
       await ctx.page.mouse.move(args.x, args.y);
@@ -73,9 +73,9 @@ export const inputSteps: Record<string, Action> = {
     if (ctx.video) await glide(ctx, await middleOf(ctx, target));
     // Hover takes no button.
     await target.hover(pointerOptions(args, ["modifiers", "position", "force"]));
-  }),
+  },
 
-  drag: step("drag from one element or point to another: { from, to }", async (ctx, args) => {
+  drag: async (ctx, args) => {
     if (!isObject(args) || args.from === undefined || args.to === undefined) bad("drag", "{ from, to }, each a target or { x, y }");
     const at = async (end: unknown): Promise<Point> => (isPoint(end) && !hasTarget(end) ? end : middleOf(ctx, locate(ctx, end, "drag")));
     const from = await at(args.from);
@@ -89,9 +89,9 @@ export const inputSteps: Record<string, Action> = {
     await ctx.page.mouse.up();
     ctx.mouse = to;
     await settle(ctx);
-  }),
+  },
 
-  scroll: step(`scroll an element into view, or scroll the page or an element: target, { by: { x, y } } or { to: "top" | "bottom" }, with or without a target`, async (ctx, args) => {
+  scroll: async (ctx, args) => {
     const by = isObject(args) && isObject(args.by) ? (args.by as Partial<Point>) : undefined;
     const to = isObject(args) ? args.to : undefined;
     if (to !== undefined && to !== "top" && to !== "bottom") bad("scroll", `to "top" or "bottom"`);
@@ -111,9 +111,9 @@ export const inputSteps: Record<string, Action> = {
         else scrollBy(move.x, move.y);
       }, movement);
     }
-  }),
+  },
 
-  press: step(`press a key or chord, on the page or an element: "Enter", "Meta+k", or { key, hold, ...target }`, async (ctx, args) => {
+  press: async (ctx, args) => {
     // A bare string is the key, so an element is only named in the object form.
     const { key, hold } = arg<{ key: string; hold?: number }>(args, "key", "press");
     if (key === undefined) bad("press", `a key like "Enter", or { key, hold, ...target }`);
@@ -125,12 +125,12 @@ export const inputSteps: Record<string, Action> = {
     // Held, the key goes down, stays down for that long, and comes up:
     // one keydown, without the repeats a held key sends by hand.
     await ctx.page.keyboard.press(String(key), { delay: hold });
-  }),
+  },
 
-  type: step(`type key by key into what has focus, or into an element: "text" or { value, delay, ...target }`, async (ctx, args) => {
+  type: async (ctx, args) => {
     const { value, delay } = arg<{ value?: string; delay?: number }>(args, "value", "type");
     if (value === undefined) bad("type", `the text to type, or { value, delay, ...target }`);
     if (isObject(args) && hasTarget(args)) await locate(ctx, args, "type").focus();
     await ctx.page.keyboard.type(String(value), { delay: delay ?? (ctx.video ? 45 : 0) });
-  }),
+  },
 };

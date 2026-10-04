@@ -12,10 +12,10 @@ import { readFileSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { DOCS, docIndex, docText, docUri } from "./docs.ts";
+import { DOCS, docContents, docIndex, docSection, docText, docUri } from "./docs.ts";
 import { checkTimeout, fileSteps, inlineSteps } from "./script.ts";
 import { end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
-import { STEP_GROUPS } from "./steps/index.ts";
+import { STEP_NAMES_BY_GROUP } from "./steps/index.ts";
 import type { SessionOptions, Step, StepResult } from "./types.ts";
 import { updateNote } from "./update.ts";
 
@@ -251,19 +251,21 @@ const sessionOptions = z.object({
 
 const step = z.record(z.string(), z.unknown());
 
-const STEPS = STEP_GROUPS.map(([title, steps]) => `${title}:\n${Object.entries(steps).map(([name, action]) => `  ${name}: ${action.about}`).join("\n")}`).join("\n");
+// Each step's name, by group: what each takes is one docs call away.
+const STEPS = STEP_NAMES_BY_GROUP.map(([title, names]) => `${title}: ${names.join(", ")}`).join("\n");
 
+// Claude Code cuts a tool's description at 2048 characters, so what an
+// agent needs first comes first, and the details are left to docs.
 const RUN = `Run steps on a session, in order, stopping at the first that fails. The session stays open either way.
 
-A step is an object with one action: { "click": "text=Save" }. Beside its action a step may have "on" (another session's name), "timeout" (ms), "message" (what to say if it fails), "note" (a comment).
-
-The reply has each step's outcome, what it handed back (a look's text, a js or playwright step's value), each screenshot as an image right after the step that took it, where the page is when that changed, and what the console logged since the last reply. Steps that code ran are listed under its step, with what they handed back.
+A step is an object with one action: { "click": "text=Save" }, { "shot": { "as": "home", "fullPage": true } }, { "back": true }. Beside its action a step may have "on" (another session's name), "timeout" (ms), "message" (what to say if it fails), "note" (a comment).
 
 Where a step takes an element, it takes any of: a Playwright selector ("button.save", "text=Sign in"), a ref a look step printed ("e12"), or an object: { "role": "button", "name": "Save" }, { "label": "Email" }, { "placeholder": ... }, { "text": ... }, { "testId": ... }, { "altText": ... }, { "title": ... }, with optional nth, exact, frame, within. In an object step the element's keys sit beside the step's own: { "fill": { "label": "Email", "value": "ada@example.com" } }.
 
+The steps, by group. For one step's forms and options, call docs with its name as the section: { "section": "expect" }.
 ${STEPS}
-Reusing steps:
-  include: run the steps in a JSON file, filling its \${name} placeholders (\${name=default}): "file.json" or { file, ...params }
+
+The reply has each step's outcome, what it handed back (a look's text, a js or playwright step's value), each screenshot as an image right after the step that took it, where the page is when that changed, and what the console logged since the last reply. Steps that code ran are listed under its step, with what they handed back.
 
 A run that takes longer than the call waits is left running: the reply says which step it is on, and the next run on that session tells the rest. Steps given meanwhile are queued after it.`;
 
@@ -273,7 +275,7 @@ A session is a browser of its own (its cookies, its tabs) pointing at an address
 
 Only addresses can conflict. Whatever answers at a session's address is used as it is; if nothing does, weblab starts the project's dev script (or the start command given) there, shares that server among the sessions pointing at it, and stops it when the last of them ends.
 
-The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks.
+The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks. It reads a whole page, or one section: { "section": "shot" } is one step's forms and options.
 
 To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). To do anything the built-in steps don't, run a js, playwright or cdp step. Sessions end when this weblab exits; nothing is written into the project.`;
 
@@ -455,14 +457,18 @@ export function createServer(version: string): McpServer {
     "docs",
     {
       title: "Read the docs",
-      description: `weblab's reference pages. With no page, lists them. Pages:\n${docIndex()}`,
-      inputSchema: z.object({ page: z.enum(pages).optional().describe("The page to read (default: the list of pages).") }),
+      description: `weblab's reference pages, whole or a section at a time. With no arguments, lists the pages and their sections. Pages:\n${docIndex()}`,
+      inputSchema: z.object({
+        page: z.enum(pages).optional().describe("The page to read whole, or with section, the page to look in."),
+        section: z.string().optional().describe(`One section: a step's name ("mock", which gives that step's forms and options), or a heading as it is written or as a link's anchor ("Refs", "steps#refs").`),
+      }),
       annotations: { readOnlyHint: true },
     },
-    ({ page }) =>
+    ({ page, section }) =>
       answering(async () => {
+        if (section !== undefined) return result([docSection(section, page)]);
         const found = DOCS.find((one) => one.name === page);
-        return result([found === undefined ? docIndex() : docText(found)]);
+        return result([found === undefined ? docContents() : docText(found)]);
       }),
   );
 
