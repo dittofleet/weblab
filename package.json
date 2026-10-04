@@ -1,6 +1,6 @@
 {
   "name": "weblab",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "An MCP server for testing and exploring web apps in a real browser.",
   "license": "MIT",
   "type": "module",
