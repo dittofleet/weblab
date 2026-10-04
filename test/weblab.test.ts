@@ -498,7 +498,7 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   const lab = weblab();
   const dir = out();
   // Recording was an option of new, and is a step now: the option says so.
-  assert.match((await lab.tool("new", { ...BASE, video: true, out: dir })).text, /no option "video"; record with the video step/);
+  assert.match((await lab.tool("new", { ...BASE, video: true, out: dir })).text, /no option "video"\. Record with the video step/);
   await lab.tool("new", { ...BASE, out: dir });
   assert.match((await lab.tool("run", { steps: [{ video: "stop" }] })).text, /FAIL {2}1 video: nothing is being recorded/);
   // On a page that hasn't mounted yet, ready and video both wait for the app.

@@ -255,7 +255,7 @@ file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
 - Starting waits for the app to be ready first, as `goto` does, so a video never opens on a blank page that is still loading. `ready` is `false` to start at once, or `{ selector | text | js, timeout }` for what to wait for.
 - `as` names the file: `{ "video": { "as": "checkout" } }` is `videos/<session>-checkout.webm`. Without it, the first take is `videos/<session>.webm` and later ones `<session>-take2.webm`, and so on.
 - Stopping holds the last frame for two seconds, so the outcome can be read, and hands back the file. A take still going when its session ends is written then, and `end` names it.
-- A tab the steps move to with `tab` during a take is recorded too, to a file of its own (`<take>-tab1.webm`). Closing it with `tab` keeps its file; a tab the page closes by itself takes its recording with it.
+- A tab the steps move to with `tab` during a take is recorded too, to a file of its own (`<take>-tab1.webm`). Closing it with `tab` keeps its file, but a tab the page closes by itself takes its recording with it.
 - It works the same in every browser, and in a browser or app the session attached to.
 
 ## Around the page

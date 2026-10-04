@@ -444,7 +444,7 @@ ok    5 video (2102ms)
 file  $TMPDIR/weblab/shop-20261003-101600/videos/demo-dark-mode.webm
 ```
 
-The video starts once the app is ready, never on a page still loading. A headless browser has no pointer of its own, so while recording weblab draws a cursor that glides to each click, types at a readable pace, and pauses after each action so the video can be followed; steps before `start` run at full speed. With `FFMPEG` set to an ffmpeg binary, an `.mp4` lands beside the `.webm`. A session attached to a running browser or app records the tab it drives the same way. [Steps](steps.md#recording-a-video) has the rest.
+The video starts once the app is ready, never on a page still loading. A headless browser has no pointer of its own, so while recording weblab draws a cursor that glides to each click, types at a readable pace, and pauses after each action so the video can be followed. Steps before `start` run at full speed. With `FFMPEG` set to an ffmpeg binary, an `.mp4` lands beside the `.webm`. A session attached to a running browser or app records the tab it drives the same way. [Steps](steps.md#recording-a-video) has the rest.
 
 ## Upload and download files
 

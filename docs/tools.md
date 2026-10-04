@@ -239,7 +239,7 @@ Every file is named after its session, so sessions sharing a directory never wri
 | `looks/<session>-<name>.yml` | A `look` given a name (`.txt` for `format: "text"`, `.html` for `format: "html"`). |
 | `console/<session>.log` | Each step as it ran, everything the page logged, page errors, failed requests, error responses, dialogs and how they were answered, and why a step failed. |
 | `network/<session>.log` | Every response (status, method, URL, with `(mocked)` on those a `mock` answered), and each WebSocket opened and closed. |
-| `videos/<session>.webm` | A `video` step's first take; later ones are `<session>-take<n>.webm`, or `<session>-<as>.webm` when named. A tab the steps moved to during a take gets `-tab<n>` after its name. With `FFMPEG` set, an `.mp4` lands beside each. |
+| `videos/<session>.webm` | A `video` step's first take. Later ones are `<session>-take<n>.webm`, or `<session>-<as>.webm` when named. A tab the steps moved to during a take gets `-tab<n>` after its name. With `FFMPEG` set, an `.mp4` lands beside each. |
 | `traces/<session>.zip` | With `trace`. Open it at [trace.playwright.dev](https://trace.playwright.dev). |
 | `server-<host>-<port>.log` | The output of a server weblab started. |
 

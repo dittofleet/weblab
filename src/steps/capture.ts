@@ -165,14 +165,14 @@ export const captureSteps: Record<string, Action> = {
 
   video: step(`record the tab steps act on, from once the app is ready until stopped: "start", "stop", or { as, ready } to start one named`, async (ctx, args) => {
     if (args === "stop") {
-      if (!ctx.video) ctx.fail(`nothing is being recorded; start with { "video": "start" }`);
+      if (!ctx.video) ctx.fail(`nothing is being recorded. Start with { "video": "start" }`);
       for (const path of await ctx.film.stop(ctx.page)) ctx.artifacts.addFile(path);
       return;
     }
     if (args !== "start" && !isObject(args)) bad("video", `"start", "stop", or { as, ready } to start`);
     const { as, ready } = isObject(args) ? args : {};
     if (as !== undefined && typeof as !== "string") bad("video", "as to be what to call the video");
-    if (ctx.video) ctx.fail(`a video is being recorded already; stop it first with { "video": "stop" }`);
+    if (ctx.video) ctx.fail(`a video is being recorded already. Stop it first with { "video": "stop" }`);
     // Not a blank page that is still loading: the video starts with the app on it.
     await waitReady(ctx, readyArg("video", ready));
     await ctx.film.start(ctx.page, as);

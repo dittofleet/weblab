@@ -222,7 +222,7 @@ function inherited(parent: Driver): SessionOptions {
 function checked(options: SessionOptions): SessionOptions {
   const unknown = Object.keys(options).find((key) => !SESSION_KEYS.includes(key));
   // Recording was once an option here, and is a step now, so it can start once the app has loaded.
-  if (unknown === "video") throw new UsageError(`new: no option "video"; record with the video step, once the session is open: { "video": "start" }, then { "video": "stop" }`);
+  if (unknown === "video") throw new UsageError(`new: no option "video". Record with the video step once the session is open: { "video": "start" }, then { "video": "stop" }`);
   if (unknown !== undefined) {
     const guess = nearest(unknown, SESSION_KEYS);
     throw new UsageError(`new: no option "${unknown}"${guess === undefined ? "" : ` (did you mean "${guess}"?)`}; it takes ${SESSION_KEYS.join(", ")}`);
