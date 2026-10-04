@@ -111,6 +111,6 @@ bun test              # end-to-end tests, in the installed Chrome
 bun run build         # dist/weblab, a single binary
 ```
 
-`src/main.ts` is the entry point and `src/mcp.ts` defines the tools. Each step lives in `src/steps/`, grouped as [Steps](docs/steps.md) lists them. Pushing a `v*` tag builds and publishes a release.
+`src/main.ts` is the entry point and `src/mcp.ts` defines the tools. Each step lives in `src/steps/`, grouped as [Steps](docs/steps.md) lists them. A release is a `vX.Y.Z` tag pushed on a commit on `main`, and nothing else: the release workflow builds the binaries, stamps the tag in as their version, and publishes them. No file in the repository holds the version, so there is nothing to bump.
 
 The API is designed for how it reads now, not for what an earlier version took. Agents learn it from the tools' own descriptions and the docs each time they connect, so nothing depends on an old name the way a script would. When a clearer name or shape turns up, change it.

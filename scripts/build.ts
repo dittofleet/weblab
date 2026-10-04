@@ -21,9 +21,15 @@ const embedPlaywrightData: Bun.BunPlugin = {
   },
 };
 
+// A release is built from its tag, vX.Y.Z, which becomes its version: no
+// file in the repository holds one. Built from anything else, it is "dev".
+const tag = process.env.GITHUB_REF_NAME ?? "";
+const version = /^v\d+\.\d+\.\d+$/.test(tag) ? tag.slice(1) : "dev";
+
 async function build(outfile: string, target?: string): Promise<void> {
   const result = await Bun.build({
     entrypoints: [join(root, "src/main.ts")],
+    define: { WEBLAB_VERSION: JSON.stringify(version) },
     plugins: [embedPlaywrightData],
     // Reached only on paths weblab never takes (Firefox over BiDi,
     // Electron), and not installed.
@@ -34,7 +40,7 @@ async function build(outfile: string, target?: string): Promise<void> {
   // An arm64 Mac kills a binary whose signature does not hold, and the
   // one bun leaves does not always. Ad-hoc is enough to run locally.
   await $`codesign --force --sign - ${outfile}`.quiet();
-  console.log(`built ${outfile}`);
+  console.log(`built ${outfile} (${version})`);
 }
 
 const targets = process.argv.slice(2);
