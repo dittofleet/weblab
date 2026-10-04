@@ -232,7 +232,7 @@ function checked(options: SessionOptions): SessionOptions {
     throw new UsageError("new: tab and newTab say what to drive in a running browser; they need attach");
   }
   if (options.attach === undefined && options.inspect !== undefined) {
-    throw new UsageError("new: inspect joins the main process of an Electron app the session is attached to; it needs attach, the app's Chromium debugging port");
+    throw new UsageError("new: inspect joins the main process of an Electron app the session is attached to, so it needs attach, the app's Chromium debugging port");
   }
   const launchOnly = (["browser", "browserArgs", "persist", "state", "context", "headed"] as const).filter((key) => options[key] !== undefined && options[key] !== false);
   if (options.attach !== undefined && launchOnly.length > 0) {
@@ -423,7 +423,7 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
         return connection.send(method as never, params as never);
       },
       mainProcess() {
-        if (main === null) throw new UsageError("electron: this session has no main process to run code in; open it with inspect, the port the app's --inspect gave it");
+        if (main === null) throw new UsageError("electron: this session has no main process to run code in. Open it with inspect, the port the app's --inspect gave it");
         return main;
       },
       async electron(code, arg) {
@@ -636,7 +636,7 @@ function invoke(step: Step, defaultOn: string): Promise<unknown> {
     });
   }
   const driver = pick(on);
-  // A running app that quit or restarted is gone; the session can only be ended.
+  // A running app that quit or restarted is gone, and the session can only be ended.
   if (driver.attached && action !== "end" && action !== "new" && driver.ctx.context.browser()?.isConnected() === false) {
     throw new StepFailure("the app this session is attached to went away: it quit or restarted. End the session and open it again");
   }

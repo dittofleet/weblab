@@ -237,7 +237,7 @@ Then [`electron`](code.md#electron-the-apps-main-process) steps run code there, 
 { "session": "app", "steps": [{ "electron": "stub(dialog, 'showMessageBox', async () => ({ response: 1 }))" }, { "click": "text=Delete" }, { "expect": "Kept" }] }
 ```
 
-What `stub` replaces is put back when the session ends; anything else the code changes stays changed until the app restarts. The port stays open as long as the app runs, to anything on the machine. When the app quits or restarts, the session says so on its next step; end it and open it again. [Code](code.md#electron-the-apps-main-process) has the rest.
+What `stub` replaces is put back when the session ends. Anything else the code changes stays changed until the app restarts. The port stays open as long as the app runs, to anything on the machine. When the app quits or restarts, the session says so on its next step. End it and open it again. [Code](code.md#electron-the-apps-main-process) has the rest.
 
 ## Other browsers and engines
 

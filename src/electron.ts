@@ -1,7 +1,7 @@
 // An Electron app's main process, joined over the Node debugger it was
 // started with (`--inspect=9229`): what the `electron` step runs code in.
 //
-// Its windows are joined over Chromium's own port (`attach`); the main
+// Its windows are joined over Chromium's own port (`attach`). The main
 // process, which owns the windows, menus, dialogs and IPC, has a port of
 // its own and speaks the same protocol's Runtime domain. Nothing is
 // opened that the app wasn't started with: weblab never turns the
@@ -40,7 +40,7 @@ const STUBS_FOR = `(session) => {
     try {
       object[name] = replacement;
     } catch {}
-    if (object[name] !== replacement) throw new TypeError("stub: " + String(name) + " can't be replaced on this object; it is read-only, or a getter");
+    if (object[name] !== replacement) throw new TypeError("stub: " + String(name) + " can't be replaced on this object (it is read-only, or a getter)");
     const { slots, sessions } = (globalThis[key] ??= { slots: new WeakMap(), sessions: {} });
     let props = slots.get(object);
     if (props === undefined) slots.set(object, (props = new Map()));
@@ -139,7 +139,7 @@ async function socketAddress(inspect: string): Promise<string> {
   const node = targets.find((target) => target.type === "node");
   if (node?.webSocketDebuggerUrl !== undefined) return node.webSocketDebuggerUrl;
   if (targets.some((target) => target.type === "page" || target.type === "browser")) {
-    throw new SetupError(`${inspect} is the app's Chromium debugging port, which is for attach; inspect takes the main process's Node one, from --inspect=<port>`);
+    throw new SetupError(`${inspect} is the app's Chromium debugging port, which is for attach. inspect takes the main process's Node one, from --inspect=<port>`);
   }
   throw new SetupError(`${inspect} has no Node process to join`);
 }
@@ -198,7 +198,7 @@ function argText(arg: Remote): string {
   return arg.description ?? JSON.stringify(arg.value);
 }
 
-// One argument as a format's `%d`, `%i` or `%f` reads it, as Node's console does; a BigInt stays one.
+// One argument as a format's `%d`, `%i` or `%f` reads it, as Node's console does. A BigInt stays one.
 function formatArg(arg: Remote, kind: string): string {
   if (!"dif".includes(kind)) return argText(arg);
   if (arg.type === "bigint" && kind !== "f") return arg.unserializableValue ?? "";
@@ -241,7 +241,7 @@ const errorText = (description: string) => description.split("\n").filter((line)
  */
 export async function joinMainProcess(inspect: string, session: string, log: (type: string, text: string) => void): Promise<MainProcess> {
   // An app paused in a debugger, or busy, doesn't answer: said, rather than waited on for ever.
-  const unanswered = () => new SetupError(`the main process at ${inspect} didn't answer within ${JOIN_TIMEOUT / 1000}s; is it paused in a debugger, or busy?`);
+  const unanswered = () => new SetupError(`the main process at ${inspect} didn't answer within ${JOIN_TIMEOUT / 1000}s. Is it paused in a debugger, or busy?`);
   const socket = new WebSocket(await socketAddress(inspect));
   await within(
     new Promise<void>((done, failed) => {
@@ -299,18 +299,18 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
   // Code that doesn't compile is the author's mistake, told about the
   // code as written, not the block it is put in. A script can't await,
   // which a step can, so code that awaits is read as an async function's
-  // body; what reads well that way but not in a block (a return) is told
+  // body. What reads well that way but not in a block (a return) is told
   // as the block found it.
   async function mistake(code: string, found: Remote): Promise<UsageError> {
     const read = await send("Runtime.compileScript", { expression: /\bawait\b/.test(code) ? `(async () => {\n${code}\n})` : code, sourceURL: "", persistScript: false });
     const description = errorText((read.result?.exceptionDetails?.exception as Remote | undefined)?.description ?? found.description ?? "");
-    const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value; it needs no return)" : "";
+    const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value, with no return)" : "";
     return new UsageError(`electron: ${description}${hint}`);
   }
 
   async function failure(code: string, exception: Remote | undefined, text: string): Promise<Error> {
     if (exception === undefined) return new StepFailure(text);
-    // One the code didn't compile with has no frames; one it threw as it ran (JSON.parse's) has.
+    // One the code didn't compile with has no frames, while one it threw as it ran (JSON.parse's) has.
     if (exception.className === "SyntaxError" && !/\n\s+at /.test(exception.description ?? "")) return mistake(code, exception);
     if (exception.subtype === "error") return new StepFailure(errorText(exception.description ?? text));
     return new StepFailure(`threw ${JSON.stringify(await asData(exception).catch(() => exception.description))}`);
@@ -332,7 +332,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     };
     // Past the timeout, code is either busy (a loop after an await, which
     // the debugger's own timeout doesn't cover) or waiting. Busy code keeps
-    // the event loop from turning, and is stopped; code that waits is left.
+    // the event loop from turning, and is stopped. Code that waits is left.
     // Never stopped on a guess: a stop when the step's code isn't what is
     // busy lands on the app's own next task, so the loop has to stay
     // stuck a full second, with the code still running.
@@ -341,14 +341,14 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
         const turned = send("Runtime.evaluate", { expression: "new Promise((done) => setImmediate(() => done(true)))", awaitPromise: true, returnByValue: true });
         const free = await Promise.race([turned.then(() => true, () => true), sleep(1000, false)]);
         if (settled) return;
-        if (free) return failed(new StepFailure(`what the code awaited hadn't settled after ${timeout}ms; it may still settle in the app`));
+        if (free) return failed(new StepFailure(`what the code awaited hadn't settled after ${timeout}ms, and may still settle in the app`));
         await Promise.race([send("Runtime.terminateExecution").catch(() => {}), sleep(1000)]);
         failed(new StepFailure(`the code kept the main process busy past ${timeout}ms, and was stopped`));
       }, timeout + 250);
     });
     try {
       // The debugger stops code that keeps the main process busy past the
-      // timeout; while it is busy, the app's windows can't respond.
+      // timeout. While it is busy, the app's windows can't respond.
       const reply = await Promise.race([run().finally(() => (settled = true)), late]);
       if (reply.error !== undefined) {
         if (Date.now() - begun >= timeout) throw new StepFailure(`the code kept the main process busy for ${timeout}ms, and was stopped`);

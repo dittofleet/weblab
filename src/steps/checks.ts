@@ -255,7 +255,7 @@ const EXPECTATIONS: Expectation[] = [
 ];
 
 // Code that should turn truthy where `evaluate` runs it. Code that
-// throws isn't true yet, and may be once the app has caught up; what it
+// throws isn't true yet, and may be once the app has caught up. What it
 // threw is said if it never is. A mistake in it is refused at once.
 function truthyCheck(code: string, where: string, evaluate: () => Promise<{ value: unknown; truthy: boolean }>): ReturnType<ExpectationBuilder> {
   let found: unknown;

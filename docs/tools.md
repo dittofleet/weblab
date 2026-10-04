@@ -89,7 +89,7 @@ The project is the nearest directory at or above `dir` with a `package.json`, lo
 - It stays where it is: with no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one is given, else against the page's current origin, an Electron app's own scheme (`myapp://`) included.
 - No server is started unless `address` or `start` is given.
 - `viewport` resizes the tab only when given.
-- When the app quits or restarts, the next step on the session says it went away; end it and open it again.
+- When the app quits or restarts, the next step on the session says it went away. End it and open it again.
 - When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups) and lets go of the browser, which keeps running.
 - A `video` step records the tab being driven, once it is ready: an app still loading isn't filmed blank.
 - With `inspect`, the session joins an Electron app's main process too, and the reply to `new` says `main process at 9229`. It is checked at once: a port that is Chromium's, a Node process that isn't Electron's, or the main process of another app than the one attached, is refused.

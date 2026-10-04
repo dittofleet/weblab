@@ -85,7 +85,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 
 - Start the app's dev server when nothing answers at its address, share it among every session pointing there, and stop it when the last one ends. A server it didn't start is used as it is and left running.
 - Run any number of sessions at once: two users, copies of an app on several ports, Chrome, Edge, WebKit and Firefox side by side.
-- Join a browser or Electron app that is already running, and leave it as it was found; run code in an Electron app's main process too.
+- Join a browser or Electron app that is already running, and leave it as it was found. Run code in an Electron app's main process too.
 - Read the page as an accessibility tree with refs to act on, as text, or as HTML.
 - Act and check: click, type, fill, drag, upload, and `expect` waits for text, elements, URLs, requests, console messages or any JavaScript.
 - Shape what the page sees: fake API responses, colour scheme, viewport, locale, a saved sign-in, a slow network.
