@@ -180,7 +180,7 @@ url   myapp://main/index.html
 title My App
 ```
 
-`attach` takes a port, `host:port`, or a full `http://` or `ws://` address. `tab` picks the tab whose URL or title contains it; without it, the first tab that isn't one of the browser's own pages. `newTab` opens a fresh tab to drive instead, and leaves the browser's own alone.
+`attach` takes a port, `host:port`, or a full `http://` or `ws://` address. `tab` picks the tab whose URL or title contains it; without it, the first tab that isn't one of the browser's own pages. `newTab` opens a fresh tab to drive instead, and leaves the browser's own alone. An Electron app can't open new tabs, so `tab` is how one of its windows is picked.
 
 - **It stays where it is.** With no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one was given, else the page's current origin, an app's own scheme included.
 - **No server is started** unless `address` or `start` is given.
@@ -237,7 +237,7 @@ session app  attached to 9222, main process at 9229
 { "session": "app", "steps": [{ "electron": "stub(dialog, 'showMessageBox', async () => ({ response: 1 }))" }, { "click": "text=Delete" }, { "expect": "Kept" }] }
 ```
 
-Stubs are put back when the session ends, but anything else the code changes stays until the app restarts. The debugger port stays open to anything on the machine for as long as the app runs. If the app quits or restarts, the next step says so, and the session has to be ended and opened again. [Code](code.md#electron-the-apps-main-process) covers the rest.
+Stubs are put back when the session ends, but anything else the code changes stays until the app restarts. The debugger port stays open to anything on the machine for as long as the app runs. If the app quits or restarts, the next step says so, and the session has to be ended and opened again. When weblab started the app, open the new session before ending the old one, or ending it stops the restarted app. [Code](code.md#electron-the-apps-main-process) covers the rest.
 
 ## Other browsers and engines
 

@@ -692,7 +692,19 @@ test("an Electron app's main process runs code beside its window, joined by its 
     const both = await lab.tool("run", { session: "app", steps: [{ playwright: "return Promise.all([electron('[1, 2]'), electron('({ a: 1 })')])" }] });
     assert.match(both.text, /\[\s*\[\s*1,\s*2\s*\],\s*\{\s*"a": 1\s*\}\s*\]/);
     // A stub can't stand in for what can't be replaced, and one over a prototype's method leaves no trace.
-    assert.match(await inMain("stub(Object.freeze({ f() {} }), 'f', () => 1)"), /FAIL {2}1 electron: TypeError: stub: f can't be replaced on this object \(it is read-only, or a getter\)/);
+    assert.match(await inMain("stub(Object.freeze({ f() {} }), 'f', () => 1)"), /FAIL {2}1 electron: TypeError: stub: f can't be replaced on this object \(it is read-only\)/);
+    // Nor for a name that isn't there, a missing replacement, or a getter and setter it couldn't put back.
+    assert.match(await inMain("stub(dialog, 'showMessageBx', () => 1)"), /stub: showMessageBx isn't on this object\. Check the name/);
+    assert.match(await inMain("stub(dialog, 'showMessageBox')"), /stub: the third argument is the replacement/);
+    assert.match(await inMain("stub(Object.defineProperty({}, 'theme', { get() { return 'light' }, set() {}, configurable: true }), 'theme', 'dark')"), /stub: theme is a getter or setter, which stub can't put back\. Set it directly instead/);
+    // A promise the code ends with that has already failed fails the step, and leaves nothing unhandled in the app.
+    const rejected = await lab.tool("run", { session: "app", steps: [{ electron: "Promise.reject(new Error('nope'))" }] });
+    assert.match(rejected.text, /FAIL {2}1 electron: Error: nope/);
+    assert.match(await inMain("app.getName()"), /"fixture"/);
+    assert.doesNotMatch((await lab.tool("run", { session: "app", steps: [{ wait: 300 }] })).text, /nhandled|PromiseRejectionHandled/);
+    // Node's own warnings are warnings, not errors.
+    const warned = await lab.tool("run", { session: "app", steps: [{ reload: true }, { electron: "process.emitWarning('old api', 'DeprecationWarning', 'DEP0999'); 1" }, { expect: { console: "DeprecationWarning: old api" } }, { expect: { noErrors: true } }] });
+    assert.equal(warned.failed, false, warned.text);
     await inMain("const Base = class { hi() { return 'base' } }; globalThis.thing = new Base(); stub(thing, 'hi', () => 'stub'); thing.hi()");
     await lab.tool("end", { session: "app" });
     await lab.tool("new", { name: "app", attach: window.port, inspect: port });
@@ -730,10 +742,13 @@ test("an Electron app's main process runs code beside its window, joined by its 
 
     await lab.tool("new", { name: "plain", attach: window.port });
     assert.match(await inMain("1", { session: "plain" }), /this session has no main process to run code in\. Open it with inspect/);
-    // So does one whose window went: steps can't be run on an app that isn't there.
-    window.stop();
+    // So does one whose window went, in the middle of a step and after it, and list says so.
+    const waiting = lab.tool("run", { session: "plain", steps: [{ wait: 5000 }] });
     await sleep(500);
+    window.stop();
+    assert.match((await waiting).text, /FAIL {2}1 wait: the app this session is attached to went away: it quit or restarted\. End the session and open it again/);
     assert.match((await lab.tool("run", { session: "plain", steps: [{ js: "1" }] })).text, /the app this session is attached to went away: it quit or restarted\. End the session and open it again/);
+    assert.match((await lab.tool("list")).text, /plain {2}attached to \d+ {2}\(gone: the app quit or restarted\)/);
 
     await lab.tool("end");
     await lab.close();

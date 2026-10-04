@@ -178,6 +178,8 @@ function attachManager(app: App): BrowserManager {
       let page: Page | undefined;
       if (newTab) {
         page = await context.newPage().catch((error) => {
+          // An Electron app has windows, not tabs to open.
+          if (/not supported/i.test(briefError(error))) throw new SetupError("this app can't open a new tab (an Electron app can't), so newTab doesn't apply. Pick one of its windows with tab");
           throw new SetupError(`could not open a new tab in the attached browser: ${briefError(error)}`);
         });
       } else {

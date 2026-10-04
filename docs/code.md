@@ -128,7 +128,7 @@ An Electron app runs each window's page in Chromium, and everything else in its 
 { "name": "app", "attach": 9222, "inspect": 9229 }
 ```
 
-The code can be several statements, and the step hands back the value of the last one, with no `return`. If that value is a promise, it is awaited, and `await` works anywhere in the code. The electron module is there as `electron`, and its common parts by name: `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen`. `require` and [`stub`](#stubs) work too. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
+The code can be several statements, and the step hands back the value of the last one, with no `return`. If that value is a promise, it is awaited, and `await` works anywhere in the code. The electron module is there as `electron`, and its common parts by name: `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen`. `require` and [`stub`](#stub-standing-in-for-a-method) work too. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
 
 Variables declared with `const`, `let` or `class` stay inside the step, so they never clash with the app's own. `var` and `function` declarations become globals of the app, as in any script.
 
@@ -149,15 +149,15 @@ Variables declared with `const`, `let` or `class` stay inside the step, so they 
 }
 ```
 
-Values come back as JSON. What isn't plain data comes back as a short label instead: a window as `[BrowserWindow]`, a function as `[Function save]`, and a reference back to an object already shown as `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, dates as ISO strings, sets as lists, and maps as objects when their keys are strings.
+Values come back as JSON. What isn't plain data comes back as a short label instead: a window as `[BrowserWindow]`, a function as `[Function save]`, and a reference back to an object already shown as `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, dates as ISO strings and sets as lists. A map comes back as an object when its keys are strings, and as a list of `[key, value]` pairs otherwise.
 
 Code with a syntax error is refused, with the app's own error message. Code that throws while it runs fails the step with the error.
 
-What the main process logs goes to the session's console log and the reply, marked `[main console.log] ...` and printed roughly as Node would print it, one level deep. These lines count the same as the page's: `ignore` filters them, `{ "expect": { "console": ... } }` can wait for one, and a `console.error` fails `noErrors`. That is usually where an IPC handler that throws shows up. Every session joined to the same app sees everything its main process logs.
+What the main process logs goes to the session's console log and the reply, marked `[main console.log] ...`. Objects in it are shown as Chrome's DevTools console shows them, one level deep. These lines count the same as the page's: `ignore` filters them, `{ "expect": { "console": ... } }` can wait for one, and a `console.error` fails `noErrors`. That is usually where an IPC handler that throws shows up. Node's own warnings, such as a deprecated API, count as warnings. As with the page's lines, checks only look at what was logged since the page last loaded, so a reload starts them afresh. Every session joined to the same app sees everything its main process logs.
 
 `{ "expect": { "electron": "code" } }` waits until the code is truthy in the main process, as `{ "expect": { "js": ... } }` does in the page.
 
-In `playwright` code, `electron(fn, arg)` runs a function in the main process. The function is sent as source text, so it can't use variables from the code around it. Pass what it needs as `arg`, which is sent as JSON.
+In `playwright` code, `electron(fn, arg)` runs a function in the main process, called with the electron module and `arg`: `await electron(({ app }, name) => app.setName(name), "Test")`. The function is sent as source text, so it can't use variables from the code around it. Pass what it needs as `arg`, which is sent as JSON.
 
 A few things about Electron itself are worth knowing:
 
@@ -171,10 +171,10 @@ Before using it:
 - **The app freezes while the code runs.** Its windows can't respond until the main process is free. Code that is still busy when the step times out is stopped, whether or not it awaited something first, and the app carries on. Code that is only waiting on a promise isn't stopped. The step stops waiting for it, but the promise may still settle later in the app.
 - **The debugger port is open to anything on the machine** while the app runs, and anything that connects to it can run code as the app. Turn it on only while testing, on a port of your own choosing. weblab never turns it on itself.
 - **Not every app can be joined.** An app packaged with the `EnableNodeCliInspectArguments` [fuse](https://www.electronjs.org/docs/latest/tutorial/fuses) turned off ignores `--inspect`. Its windows can still be attached. Dev builds normally have the fuse on.
-- **Quitting and restarting aren't blocked.** If the app exits while a session is joined to it, weblab lets go at once, so a dev tool's restart goes through. The next step on that session says the app went away. End the session and open a new one on the restarted app.
+- **Quitting and restarting aren't blocked.** If the app exits while a session is joined to it, weblab lets go at once, so a dev tool's restart goes through. The next step on that session says the app went away, and `list` marks it as gone. End the session and open a new one on the restarted app. If weblab started the app, ending its last session stops the restarted app too, so open the new session first.
 - **Both ports must belong to the same app.** An app's main process is also the browser process behind its windows, so `new` refuses an `attach` and an `inspect` that point at two different apps.
 
-### Stubs
+### stub: standing in for a method
 
 `stub(object, name, replacement)` replaces `object[name]` for the rest of the session. When the session ends, the original is put back, so an attached app is left the way it was found. It is how a test answers a native dialog, catches a link that would open a browser, or serves a request that would otherwise leave the machine:
 
@@ -195,7 +195,7 @@ Before using it:
 
 Electron's dialog functions take a window as their first argument only when the app passes one, so a replacement that needs the options reads the last argument, `args.at(-1)`. A replacement that calls the original saves it first, as the `fetch` one does. Logging from a replacement is how a check can tell it was called.
 
-`stub` refuses a property it can't replace, such as a read-only one or a getter. The electron module's own parts are getters, so stub `dialog.showOpenDialog`, not `electron.dialog`. When the session ends, each property goes back to exactly how it was, even one inherited from a prototype. A property something else has replaced in the meantime is left alone.
+`stub` refuses what it couldn't put back as it was: a name the object doesn't have (usually a typo), a read-only property, or a getter or setter. The electron module's own parts are getters, so stub `dialog.showOpenDialog`, not `electron.dialog`. A setting such as `nativeTheme.themeSource` is a setter, so it is set directly instead, and stays set after the session. When the session ends, each stubbed property goes back to exactly how it was, even one inherited from a prototype. A property something else has replaced in the meantime is left alone.
 
 ## Code files
 

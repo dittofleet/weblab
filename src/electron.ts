@@ -25,8 +25,9 @@ export type MainProcess = {
 const MODULES = ["app", "BrowserWindow", "webContents", "ipcMain", "dialog", "Menu", "shell", "session", "clipboard", "nativeTheme", "screen"];
 
 // Run in the app for one session: its `stub(object, name, replacement)`,
-// and what puts back all it stubbed. Each stubbed property keeps how it
-// was (its own property, or none, when it came from a prototype) and a
+// and what puts back all it stubbed. Only plain properties are stubbed:
+// a typo, a getter or a setter is refused. Each keeps how it was (its
+// own property, or none, when it came from a prototype) and a
 // layer per stub over it, whichever session made it, so sessions that
 // stub the same thing can end in any order: the property shows the
 // newest layer left, else is as it was. One that something else has
@@ -36,11 +37,18 @@ const MODULES = ["app", "BrowserWindow", "webContents", "ipcMain", "dialog", "Me
 const STUBS_FOR = `(session) => {
   const key = Symbol.for("weblab.stubs");
   const stub = (object, name, replacement) => {
+    if (object === null || (typeof object !== "object" && typeof object !== "function")) throw new TypeError("stub: the first argument is the object whose method is stubbed");
+    if (!(name in object)) throw new TypeError("stub: " + String(name) + " isn't on this object. Check the name");
+    if (replacement === undefined) throw new TypeError("stub: the third argument is the replacement");
+    let found;
+    for (let on = object; on !== null && found === undefined; on = Object.getPrototypeOf(on)) found = Object.getOwnPropertyDescriptor(on, name);
+    // A setter would take the replacement, and nothing could put the old value back as it was.
+    if (found.get !== undefined || found.set !== undefined) throw new TypeError("stub: " + String(name) + " is a getter or setter, which stub can't put back. Set it directly instead");
     const own = Object.getOwnPropertyDescriptor(object, name);
     try {
       object[name] = replacement;
     } catch {}
-    if (object[name] !== replacement) throw new TypeError("stub: " + String(name) + " can't be replaced on this object (it is read-only, or a getter)");
+    if (object[name] !== replacement) throw new TypeError("stub: " + String(name) + " can't be replaced on this object (it is read-only)");
     const { slots, sessions } = (globalThis[key] ??= { slots: new WeakMap(), sessions: {} });
     let props = slots.get(object);
     if (props === undefined) slots.set(object, (props = new Map()));
@@ -75,12 +83,18 @@ const STUBS_FOR = `(session) => {
 
 const stubsFor = (session: string) => `(${STUBS_FOR})(${JSON.stringify(session)})`;
 
-// The code goes in a block of its own, inside the one that hands it its
-// names, so what it declares with const, let and class stays in it and
-// may reuse those names. A block's value is its last statement's, so
-// `const n = app.getName(); n` hands back the name.
+// Code that awaits, which a script can't, goes straight into the block.
+const awaits = (code: string) => /\bawait\b/.test(code);
+
+// The code runs inside a block that hands it its names, so what it
+// declares with const, let and class stays in it and may reuse those
+// names. Its value is its last statement's, so `const n = app.getName(); n`
+// hands back the name. Code that doesn't await runs through eval, whose
+// value is awaited at once: a promise it ends with that has already
+// failed is then caught in the same turn, before the app could report it
+// as unhandled. Code that awaits goes in a block of its own instead.
 const wrapped = (code: string, session: string) =>
-  `{ const electron = require("electron"); const { ${MODULES.join(", ")} } = electron; const { stub } = ${stubsFor(session)}; { ${code}\n} }`;
+  `{ const electron = require("electron"); const { ${MODULES.join(", ")} } = electron; const { stub } = ${stubsFor(session)}; ${awaits(code) ? `{ ${code}\n}` : `await eval(${JSON.stringify(code)})`} }`;
 
 // Run in the app on what the code handed back: data as it is, and what
 // isn't data as what it is, at any depth: `[BrowserWindow]`, `[Function save]`.
@@ -220,6 +234,9 @@ const truthy = (remote: Remote): boolean => {
   return remote.objectId !== undefined || Boolean(remote.value);
 };
 
+// A warning as Node prints it: `(node:1234) [DEP0005] DeprecationWarning: ...`.
+const NODE_WARNING = /^\(node:\d+\) (\[\w+\] )?\w*Warning: /;
+
 // How long joining the main process may take.
 const JOIN_TIMEOUT = 10_000;
 
@@ -263,7 +280,9 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
       waiting.get(message.id)?.done(message);
       waiting.delete(message.id);
     } else if (message.method === "Runtime.consoleAPICalled" && message.params.timestamp >= since) {
-      log(message.params.type, consoleText(message.params.args));
+      const text = consoleText(message.params.args);
+      // Node prints its own warnings (a deprecated API, say) with console.error. They are warnings.
+      log(message.params.type === "error" && NODE_WARNING.test(text) ? "warning" : message.params.type, text);
     } else if (message.method === "NodeRuntime.waitingForDisconnect") {
       // The app is exiting, and waits for its debugger clients to let go before it can.
       socket.close();
@@ -296,22 +315,24 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     return copied.result?.result?.value ?? remote.description;
   }
 
-  // Code that doesn't compile is the author's mistake, told about the
-  // code as written, not the block it is put in. A script can't await,
-  // which a step can, so code that awaits is read as an async function's
-  // body. What reads well that way but not in a block (a return) is told
-  // as the block found it.
-  async function mistake(code: string, found: Remote): Promise<UsageError> {
-    const read = await send("Runtime.compileScript", { expression: /\bawait\b/.test(code) ? `(async () => {\n${code}\n})` : code, sourceURL: "", persistScript: false });
-    const description = errorText((read.result?.exceptionDetails?.exception as Remote | undefined)?.description ?? found.description ?? "");
-    const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value, with no return)" : "";
-    return new UsageError(`electron: ${description}${hint}`);
+  // Whether a SyntaxError is a mistake in the code, or one it threw as it
+  // ran (JSON.parse's): the code as written is compiled to tell, and a
+  // mistake is told about the code, not the block it was put in. Code that
+  // awaits is compiled as an async function's body, which allows a return
+  // that a step doesn't.
+  async function mistake(code: string, found: Remote): Promise<UsageError | null> {
+    const read = await send("Runtime.compileScript", { expression: awaits(code) ? `(async () => {\n${code}\n})` : code, sourceURL: "", persistScript: false });
+    const written = (read.result?.exceptionDetails?.exception as Remote | undefined)?.description;
+    const returns = /Illegal return/.test(found.description ?? "");
+    if (written === undefined && !returns) return null;
+    const hint = returns || /Illegal return/.test(written ?? "") ? " (an electron step hands back its last statement's value, with no return)" : "";
+    return new UsageError(`electron: ${errorText(written ?? found.description ?? "")}${hint}`);
   }
 
   async function failure(code: string, exception: Remote | undefined, text: string): Promise<Error> {
     if (exception === undefined) return new StepFailure(text);
-    // One the code didn't compile with has no frames, while one it threw as it ran (JSON.parse's) has.
-    if (exception.className === "SyntaxError" && !/\n\s+at /.test(exception.description ?? "")) return mistake(code, exception);
+    const written = exception.className === "SyntaxError" ? await mistake(code, exception) : null;
+    if (written !== null) return written;
     if (exception.subtype === "error") return new StepFailure(errorText(exception.description ?? text));
     return new StepFailure(`threw ${JSON.stringify(await asData(exception).catch(() => exception.description))}`);
   }
