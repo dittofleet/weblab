@@ -52,8 +52,18 @@ const PAGE = `<!doctype html>
   }, 300);
 </script>`;
 
+// The React page: what the tests build from react/App.tsx, with its source map.
+const built = (file, type) => () => {
+  const path = join(import.meta.dirname, "react-dist", file);
+  return existsSync(path) ? [200, type, readFileSync(path)] : [404, "text/plain", "not built"];
+};
+
 const ROUTES = {
   "/": () => [200, "text/html", PAGE],
+  "/react": () => [200, "text/html", '<!doctype html><title>react fixture</title><div id="root"></div><script src="/node_modules/fake-lib/index.js"></script><script type="module" src="/react/App.js"></script>'],
+  "/node_modules/fake-lib/index.js": () => [200, "text/javascript", readFileSync(join(import.meta.dirname, "fake-lib.js"))],
+  "/react/App.js": built("App.js", "text/javascript"),
+  "/react/App.js.map": built("App.js.map", "application/json"),
   "/other": () => [200, "text/html", "<!doctype html><title>other</title><h1>Other page</h1>"],
   "/api/me": () => [200, "application/json", JSON.stringify({ name: "real" })],
 };

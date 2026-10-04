@@ -89,6 +89,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 - Read the page as an accessibility tree with refs to act on, as text, or as HTML.
 - Act and check: click, type, fill, drag, upload, and `expect` waits for text, elements, URLs, requests, console messages or any JavaScript.
 - Shape what the page sees: fake API responses, colour scheme, viewport, locale, a saved sign-in, a slow network.
+- See a React app the way React DevTools does: its components, where each one's code is, and what rendered and why. Change props, state and boundaries on the spot.
 - Run JavaScript in the page, Playwright code against it, or raw Chrome DevTools Protocol commands, for anything the built-in steps don't cover.
 - Keep screenshots, compare one with an earlier one, capture native menus from the real screen, record video and Playwright traces, and log the console and network.
 
@@ -111,3 +112,5 @@ bun run build         # dist/weblab, a single binary
 ```
 
 `src/main.ts` is the entry point and `src/mcp.ts` defines the tools. Each step lives in `src/steps/`, grouped as [Steps](docs/steps.md) lists them. Pushing a `v*` tag builds and publishes a release.
+
+The API is designed for how it reads now, not for what an earlier version took. Agents learn it from the tools' own descriptions and the docs each time they connect, so nothing depends on an old name the way a script would. When a clearer name or shape turns up, change it.

@@ -141,21 +141,21 @@ type Message = { id?: number; method?: string; params?: any; result?: any; error
 type Target = { type?: string; webSocketDebuggerUrl?: string };
 
 // The debugger's own address for the process, asked of its port.
-async function socketAddress(inspect: string): Promise<string> {
-  const base = endpoint(inspect);
+async function socketAddress(address: string): Promise<string> {
+  const base = endpoint(address);
   if (base.startsWith("ws")) return base;
   let targets: Target[];
   try {
     targets = (await (await fetch(`${base}/json/list`, { signal: AbortSignal.timeout(5000) })).json()) as Target[];
   } catch (error) {
-    throw new SetupError(`could not reach the main process at ${inspect}: ${briefError(error)} (the app has to be started with --inspect=<port>)`);
+    throw new SetupError(`could not reach the main process at ${address}: ${briefError(error)} (the app has to be started with --inspect=<port>)`);
   }
   const node = targets.find((target) => target.type === "node");
   if (node?.webSocketDebuggerUrl !== undefined) return node.webSocketDebuggerUrl;
   if (targets.some((target) => target.type === "page" || target.type === "browser")) {
-    throw new SetupError(`${inspect} is the app's Chromium debugging port, which is for attach. inspect takes the main process's Node one, from --inspect=<port>`);
+    throw new SetupError(`${address} is the app's Chromium debugging port, which is for attach. mainProcess takes the main process's Node one, from --inspect=<port>`);
   }
-  throw new SetupError(`${inspect} has no Node process to join`);
+  throw new SetupError(`${address} has no Node process to join`);
 }
 
 // A value as the debugger describes it.
@@ -253,17 +253,17 @@ function within<T>(work: Promise<T>, ms: number, late: () => Error): Promise<T> 
 const errorText = (description: string) => description.split("\n").filter((line) => !/^\s+at .*<anonymous>/.test(line)).join("\n");
 
 /**
- * Joins the main process at `inspect` and checks that it is Electron's.
+ * Joins the main process at `address` and checks that it is Electron's.
  * What it logs from now on goes to `log`. `session` names what the code stubs.
  */
-export async function joinMainProcess(inspect: string, session: string, log: (type: string, text: string) => void): Promise<MainProcess> {
+export async function joinMainProcess(address: string, session: string, log: (type: string, text: string) => void): Promise<MainProcess> {
   // An app paused in a debugger, or busy, doesn't answer: said, rather than waited on for ever.
-  const unanswered = () => new SetupError(`the main process at ${inspect} didn't answer within ${JOIN_TIMEOUT / 1000}s. Is it paused in a debugger, or busy?`);
-  const socket = new WebSocket(await socketAddress(inspect));
+  const unanswered = () => new SetupError(`the main process at ${address} didn't answer within ${JOIN_TIMEOUT / 1000}s. Is it paused in a debugger, or busy?`);
+  const socket = new WebSocket(await socketAddress(address));
   await within(
     new Promise<void>((done, failed) => {
       socket.onopen = () => done();
-      socket.onerror = () => failed(new SetupError(`could not join the main process at ${inspect}`));
+      socket.onerror = () => failed(new SetupError(`could not join the main process at ${address}`));
     }),
     JOIN_TIMEOUT,
     unanswered,
@@ -391,7 +391,7 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
         // Electron's own main process, rather than some other Node program: one whose electron module has an app.
         const reply = await send("Runtime.evaluate", { expression: `typeof require("electron").app === "object" ? process.pid : null`, includeCommandLineAPI: true, returnByValue: true });
         const found = reply.result?.result?.value;
-        if (typeof found !== "number") throw new SetupError(`${inspect} is a Node process, but not an Electron app's main process`);
+        if (typeof found !== "number") throw new SetupError(`${address} is a Node process, but not an Electron app's main process`);
         // Told when the app is about to exit, so it isn't kept waiting for weblab to let go.
         await send("NodeRuntime.notifyWhenWaitingForDisconnect", { enabled: true });
         await send("Runtime.enable");

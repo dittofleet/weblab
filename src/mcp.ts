@@ -15,7 +15,8 @@ import { z } from "zod";
 import { DOCS, docContents, docIndex, docSection, docText, docUri } from "./docs.ts";
 import { checkTimeout, fileSteps, inlineSteps } from "./script.ts";
 import { end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
-import { STEP_NAMES_BY_GROUP } from "./steps/index.ts";
+import { builtinActions, STEP_NAMES_BY_GROUP } from "./steps/index.ts";
+import { mapText } from "./sources.ts";
 import type { SessionOptions, Step, StepResult } from "./types.ts";
 import { updateNote } from "./update.ts";
 
@@ -112,8 +113,8 @@ function stepLines(step: StepResult, prefix = ""): string[] {
   for (const text of step.notes ?? []) lines.push(`note  ${text}`);
   for (const inner of step.steps ?? []) lines.push(...indented(stepLines(inner, `${number}.`)));
   if (step.value !== undefined) {
-    // What a look read is printed as it is; anything else, as JSON.
-    if (step.action === "look" && typeof step.value === "string") lines.push("", step.value, "");
+    // What a step reads out (a look, a react step) is printed as it is, and anything else as JSON.
+    if (builtinActions[step.action]?.prints && typeof step.value === "string") lines.push("", step.value, "");
     else lines.push(printable(step.value));
   }
   // Each picture under the step that took it.
@@ -153,10 +154,11 @@ async function where(name: string, always: boolean): Promise<string[]> {
   const tabs = ctx.context.pages().map((tab, index) => `tab ${index}${tab === ctx.page ? "*" : " "} ${tab.url()}`);
   if (tabs.length > 1 && (always || tabs.join("\n") !== open.shownTabs)) lines.push(...tabs);
   open.shownTabs = tabs.join("\n");
-  const logged = collapse(open.consoleSinceLast().filter((line) => !line.startsWith("--- ") && !line.startsWith("[weblab]")));
-  if (logged.length > 0) {
-    const shown = logged.slice(-MAX_CONSOLE_LINES);
-    lines.push("", `console since the last reply${logged.length > shown.length ? ` (the last ${shown.length} of ${logged.length} lines; all of it is in ${open.consoleLog})` : ""}:`, ...shown.map((line) => `  ${line}`));
+  const all = collapse(open.consoleSinceLast().filter((line) => !line.startsWith("--- ") && !line.startsWith("[weblab]")));
+  if (all.length > 0) {
+    // Stacks in the lines shown point at the source, as the project names it, not at what was served.
+    const shown = await Promise.all(all.slice(-MAX_CONSOLE_LINES).map((line) => mapText(line, (place) => ctx.sources.known(place))));
+    lines.push("", `console since the last reply${all.length > shown.length ? ` (the last ${shown.length} of ${all.length} lines; all of it is in ${open.consoleLog})` : ""}:`, ...shown.map((line) => `  ${line}`));
   }
   return lines;
 }
@@ -206,8 +208,8 @@ async function answering(work: () => Promise<Result>): Promise<Result> {
 }
 
 const describe = (open: Session): string => {
-  const { attach, inspect } = open.app.settings;
-  const where = open.attached ? [`attached to ${attach}`, inspect !== undefined && `main process at ${inspect}`, open.address !== null && `at ${open.address}`] : [`at ${open.address}`];
+  const { attach, mainProcess } = open.app.settings;
+  const where = open.attached ? [`attached to ${attach}`, mainProcess !== undefined && `main process at ${mainProcess}`, open.address !== null && `at ${open.address}`] : [`at ${open.address}`];
   const at = where.filter(Boolean).join(", ") + (open.gone() ? "  (gone: the app quit or restarted)" : "");
   const server = open.server?.owned ? ` (server started by weblab: ${open.server.command})` : "";
   return `${open.name}  ${at}${server}`;
@@ -233,7 +235,7 @@ const sessionOptions = z.object({
   attach: z.union([z.string(), z.number()]).optional().describe("Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. It is left as it was found."),
   tab: z.string().optional().describe("With attach: which tab to drive, by part of its URL or title (default: the first)."),
   newTab: z.boolean().optional().describe("With attach: drive a new tab, and leave the browser's own alone."),
-  inspect: z.union([z.string(), z.number()]).optional().describe("With attach to an Electron app: its main process's Node debugger port or address (from --inspect=<port>), for electron steps."),
+  mainProcess: z.union([z.string(), z.number()]).optional().describe("With attach to an Electron app: its main process's Node debugger port or address (from --inspect=<port>), for electron steps."),
   browser: z.string().optional().describe("The browser to launch: chrome (default), edge, brave, chromium, another installed Chromium browser's name or path; or webkit (Safari's engine) or firefox, which are Playwright's own builds."),
   browserArgs: z.array(z.string()).optional().describe("Extra command-line flags for the browser it launches."),
   headed: z.boolean().optional().describe("Give the browser a window on the screen (default: headless)."),
@@ -244,6 +246,7 @@ const sessionOptions = z.object({
   trace: z.union([z.boolean(), z.literal("on-failure")]).optional().describe(`Keep a Playwright trace, written when the session ends: true, or "on-failure" to keep it only if a step failed.`),
   timeout: z.number().optional().describe("How long each step may take, in milliseconds, unless the run or the step says (default: 10000)."),
   ignore: z.array(z.string()).optional().describe("Console output and failed requests matching these regular expressions are left out of the console log and of error checks."),
+  init: z.union([z.string(), z.array(z.string())]).optional().describe("A script file, or several, run in every page before its own scripts: a stub for what the page expects to find (an Electron app's preload API)."),
   ready: z
     .object({ selector: z.string().optional(), text: z.string().optional(), js: z.string().optional(), timeout: z.number().optional() })
     .optional()
@@ -263,7 +266,7 @@ const RUN = `Run steps on a session, in order, stopping at the first that fails.
 
 A step is an object with one action: { "click": "text=Save" }, { "shot": { "as": "home", "fullPage": true } }, { "back": true }. Beside its action a step may have "on" (another session's name), "timeout" (ms), "message" (what to say if it fails), "note" (a comment).
 
-Where a step takes an element, it takes any of: a Playwright selector ("button.save", "text=Sign in"), a ref a look step printed ("e12"), or an object: { "role": "button", "name": "Save" }, { "label": "Email" }, { "placeholder": ... }, { "text": ... }, { "testId": ... }, { "altText": ... }, { "title": ... }, with optional nth, exact, frame, within. In an object step the element's keys sit beside the step's own: { "fill": { "label": "Email", "value": "ada@example.com" } }.
+Where a step takes an element, it takes any of: a Playwright selector ("button.save", "text=Sign in"), a ref a look step printed ("e12"), or an object: { "role": "button", "name": "Save" }, { "label": "Email" }, { "placeholder": ... }, { "text": ... }, { "testId": ... }, { "altText": ... }, { "title": ... }, { "component": "CartItem" } (React), with optional nth, exact, frame, within. In an object step the element's keys sit beside the step's own: { "fill": { "label": "Email", "value": "ada@example.com" } }.
 
 The steps, by group. For one step's forms and options, call docs with its name as the section: { "section": "expect" }.
 ${STEPS}
@@ -280,7 +283,7 @@ Only addresses can conflict. Whatever answers at a session's address is used as 
 
 The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks. It reads a whole page, or one section: { "section": "shot" } is one step's forms and options.
 
-To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (inspect). Sessions end when this weblab exits; nothing is written into the project.`;
+To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). In a React app, { "react": "tree" } shows its components and { "react": { "inspect": ... } } one of them, with its file and line. To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (new's mainProcess). Sessions end when this weblab exits; nothing is written into the project.`;
 
 export function createServer(version: string): McpServer {
   const server = new McpServer({ name: "weblab", version }, { instructions: INSTRUCTIONS });

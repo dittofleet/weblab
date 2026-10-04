@@ -2,7 +2,7 @@
 
 This is the reference for every step `run` takes: what each does, its forms and options, how steps name elements, and how steps are reused with `include` and placeholders. The `run` tool's own description lists the same steps in one line each.
 
-Most steps are shortcuts for what is done all the time. Five of them run code (`js`, `css`, `playwright`, `cdp`, and `electron` in an Electron app's main process), and with those anything a browser can do is in reach. [Code](code.md) covers them.
+Most steps are shortcuts for what is done all the time. Five of them run code (`js`, `css`, `playwright`, `cdp`, and `electron` in an Electron app's main process), and with those anything a browser can do is in reach. [Code](code.md) covers them. In a React app, `react` reads and changes its components the way React DevTools does.
 
 | Group | Steps |
 | --- | --- |
@@ -13,6 +13,7 @@ Most steps are shortcuts for what is done all the time. Five of them run code (`
 | [Reading and capturing](#reading-and-capturing) | `look`, `shot`, `video` |
 | [Around the page](#around-the-page) | `dialog`, `mock`, `saveState` |
 | [Code](#code) | `js`, `css`, `playwright`, `cdp` |
+| [React](#react) | `react` |
 | [More than one session](#more-than-one-session) | `new`, `end` |
 | [Reusing steps](#reusing-steps) | `include` |
 
@@ -68,6 +69,7 @@ Wherever a step takes an element, it takes any of these:
 | `{ "text": "Sign in" }` | An element by the text it shows. |
 | `{ "testId": "cart" }` | An element by its `data-testid`. |
 | `{ "altText": "Logo" }`, `{ "title": "Close" }` | An element by its alt text or title. |
+| `{ "component": "CartItem" }`, `"c12"` | In a React app, the first element each instance of a component renders: by its name, or by the id `react` printed for one. See [React](#react). |
 | `{ "selector": "li" }` | A selector, in object form, so it can take the options below. |
 | `{ "ref": "e12" }` | A ref, in object form. A ref already names one element, so it takes no options. |
 
@@ -168,10 +170,10 @@ A path in a step (`upload`, a `js` or `playwright` file, a shot's `matches`) is 
 | `{ ...target, "enabled": true }` | The element is enabled (or, with `false`, disabled). |
 | `{ "url": "/cart" }`, `{ "title": "Cart" }` | The page's URL or title matches (see [Matching](#matching)). |
 | `{ "request": "**/api/save", "status": 200 }` | The page has had a response from a matching URL since it loaded, with that status if one is given. If none matches, the failure lists the responses that came closest. |
-| `{ "console": "loaded" }` | The page has logged a matching console message since it loaded. With `inspect`, what the app's main process logged counts too. |
-| `{ "noErrors": true }` | The page has logged no console errors and thrown no errors since it loaded, past the session's `ignore`. With `inspect`, the main process's console errors count too. Checked once, not retried. An error a `mock` caused on purpose doesn't count. |
+| `{ "console": "loaded" }` | The page has logged a matching console message since it loaded. With `mainProcess`, what the app's main process logged counts too. |
+| `{ "noErrors": true }` | The page has logged no console errors and thrown no errors since it loaded, past the session's `ignore`. With `mainProcess`, the main process's console errors count too. Checked once, not retried. An error a `mock` caused on purpose doesn't count. |
 | `{ "js": "expression" }` | The expression is truthy in the page. If it never is, the failure says what it was. |
-| `{ "electron": "code" }` | The code is truthy in the app's main process, run as the [`electron`](code.md#electron-the-apps-main-process) step runs it. Needs `inspect`. If it never is, the failure says what it was. |
+| `{ "electron": "code" }` | The code is truthy in the app's main process, run as the [`electron`](code.md#electron-the-apps-main-process) step runs it. Needs `mainProcess`. If it never is, the failure says what it was. |
 
 "Since it loaded" means since the tab last loaded a document: a `goto` or a reload starts afresh, and a route change inside a single-page app doesn't. To check that one action caused one request, use code: see [Recipes](recipes.md#check-that-nothing-errored-and-that-the-app-called-its-api).
 
@@ -275,9 +277,214 @@ file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
 | `css` | `"css"` | Adds a stylesheet to the page, kept through reloads and new tabs for the rest of the session. |
 | `playwright` | `"code"` or `{ file }` | Runs Playwright code against the page and hands back what it returns. |
 | `cdp` | `"Domain.method"` or `{ method, params }` | Sends one raw Chrome DevTools Protocol command and hands back its result. Chromium browsers only. |
-| `electron` | `"code"` or `{ file }` | Runs JavaScript in an attached Electron app's main process and hands back its value. Needs `inspect`. |
+| `electron` | `"code"` or `{ file }` | Runs JavaScript in an attached Electron app's main process and hands back its value. Needs `mainProcess`. |
 
 [Code](code.md) covers what each is handed, and what they make possible.
+
+## React
+
+| Step | Forms | What it does |
+| --- | --- | --- |
+| `react` | `"tree"`, `"renders"`, or `{ tree \| inspect \| renders \| set \| suspend \| error: component, ...options }` | Reads a React app's components and what made them render, and changes their props, state and boundaries, the way React DevTools does. |
+
+| Form | What it does |
+| --- | --- |
+| `{ "react": "tree" }` | Hands back the app's components as a tree, each with an id to name it by. `{ "react": { "tree": "Cart" } }` starts at one component. |
+| `{ "react": { "inspect": "Cart" } }` | Hands back one component: where its code is, what rendered it, its props, hooks and state, and the context it reads. |
+| `{ "react": "renders" }` | Hands back what rendered since it was last asked (the first time, since the page loaded), how often, and why. `{ "react": { "renders": "Cart" } }` keeps to one component and what is inside it. |
+| `{ "react": { "set": "Cart", "hook": 0, "value": [] } }` | Changes a prop, a hook's state, or a class component's state, and lets React render it. |
+| `{ "react": { "suspend": "Products" } }` | Makes the `Suspense` boundary around the component show its fallback, until `{ "react": { "suspend": false } }`. |
+| `{ "react": { "error": "Checkout" } }` | Makes the error boundary around the component show its error state, until `{ "react": { "error": false } }`. |
+
+It works with a development build of React 16.14 or later, in any browser and with any bundler or framework. Forcing an error boundary needs React 18 or later. In a production build, names are minified, there are no source locations, and nothing can be changed. The first `react` step on such a page says so.
+
+The tree is the app's components, each with what it was given (a key, a few short props) and its id:
+
+```text
+- root <div#root>
+  - App [c1]
+    - ThemeContext.Provider value="light" [c96]
+      - Header [c5]
+      - ProductGrid query="" [c6]
+        - ProductCard key="kettle" [c12]
+        - ProductCard key="lamp" [c26]
+      - Cart [c9]
+(104 components from node_modules left out, shown with "library": true)
+```
+
+And `inspect` opens one of them:
+
+`run`
+
+```json
+{ "steps": [{ "react": { "inspect": { "role": "button", "name": "Add Mug" } } }] }
+```
+
+```text
+ok    1 react (24ms)
+
+ProductCard [c40] memo, compiled by React Compiler
+key      "mug"
+source   src/components/ProductCard.tsx:7:22
+used at  src/components/ProductGrid.tsx:14:9
+owners   ProductGrid < App
+elements <div.card>
+via      Primitive.button.Slot [c50] from @radix-ui/react-tooltip rendered the element ("library": true inspects it)
+renders  1 since the page loaded
+props
+  product: { id: "mug", name: "Mug", price: 12 }
+  onAdd: ƒ t1()
+```
+
+`source` is where the component's own code is, and `used at` is the line in its parent's code that writes `<ProductCard>`. Both point into the project's own files, through the page's source maps.
+
+### Naming a component
+
+Every form names a component, except bare `"tree"` and `"renders"`. There are three ways to name one:
+
+| Written as | Names |
+| --- | --- |
+| `"CartItem"` | The first component with that name, in the order of the tree. `nth` beside it picks a later one, counting from 0. |
+| `"c12"` | The component the tree, `inspect` or `renders` printed that id for. |
+| Any target: `{ "role": "button", "name": "Pay" }`, `"e12"` | The app's own component that rendered that element. |
+
+```json
+{ "react": { "inspect": "CartItem", "nth": 1 } }
+{ "react": { "inspect": { "text": "Socks" } } }
+{ "react": { "error": "c12" } }
+```
+
+An id lasts as long as the tab: after a reload, the ids from before name nothing. A component that unmounted is gone, and its id with it.
+
+Other steps can name a component as a target, `{ "component": "Checkout" }` or `"c12"`, which means the first element it renders: `{ "click": { "component": "Checkout" } }`.
+
+When the element a target names was written by a different component from the one that rendered it, as with a wrapper that renders its `children`, `inspect` says so on a `written` line.
+
+### Options
+
+| Option | Taken by | What it does |
+| --- | --- | --- |
+| `nth` | All | Which component of that name, counting from 0. |
+| `library` | All | Treats components from `node_modules` as the app's own: `tree` and `renders` show them, `inspect` lists their hooks in full, and an element names the library component that rendered it. See [Components from libraries](#components-from-libraries). |
+| `depth` | `tree` | How many levels to show. |
+| `hook`, `prop`, `state` | `inspect`, `set` | Which value: a hook by the number `inspect` gives it, a prop by name, or a class component's state. A path can go inside it: `"3.data.pages"` or `[3, "data", "pages"]`. Given to `inspect`, it hands back that one value in full. |
+| `value` | `set` | The value to set, as JSON. |
+| `js` | `set` | An expression run in the page, for a value JSON can't hold, such as a Set or a Date: `"new Set(['a'])"`. |
+| `keep` | `renders` | Hands back what was counted without clearing it. |
+
+An option an action doesn't take is refused, not ignored.
+
+### What renders says
+
+`run`
+
+```json
+{ "steps": [{ "react": "renders" }, { "type": { "placeholder": "Search products", "value": "t" } }, { "react": "renders" }] }
+```
+
+```text
+ok    1 react (3ms)
+
+3 commits since the last time asked (12.2 ms rendering), 95 components rendered
+  ...
+ok    2 type (6ms)
+ok    3 react (2ms)
+
+2 commits since the last time asked (0.4 ms rendering), 5 components rendered
+  App [c1] (compiled)     1×    0.2 ms  state changed: hook 1 (useState) "" → "t"
+  ProductGrid [c6]        1×   <0.1 ms  props changed: query
+unmounted: ProductCard ×3
+(3 renders of 3 components from node_modules left out, shown with "library": true)
+```
+
+A commit is one time React updates the page, and one commit can render many components. Each line is a component, how many times it rendered, how long it took itself (its children aside), and why. Three or more instances of one component, like a list's items, share a line. `(compiled)` marks a component the React Compiler compiled. The reasons:
+
+| Reason | What happened |
+| --- | --- |
+| `mounted` | The component appeared. |
+| `props changed: item` | A prop has a new value. For an object, `(inside: qty)` says which of its keys changed. |
+| `props new but equal: style` | A prop is a new object, array or element with the same contents as before. Making it once would save the render. |
+| `state changed: hook 2 (useCart › useState) [] → Array(1)` | A hook's state changed: which hook, the custom hooks it is called in, and from what to what. For an object, which of its keys changed: `hook 3 (useQuery): status "pending" → "success", data`. |
+| `context changed: ThemeContext` | A context it reads has a new value. |
+| `parent rendered (props equal)` | Its parent rendered and its props came out the same. `memo` would save the render. Under a compiled parent it also says that the parent made the element again, so something the element was made from changed. |
+| `rendered (nothing it reads changed)` | It rendered with nothing it reads changed, as after a `forceUpdate`. |
+
+Asking clears what was counted, so the next time says what happened in between. Asking about one component clears only what is within it. `"keep": true` hands it back and keeps counting.
+
+### Changing a component
+
+`set` changes one value and waits for React to render it:
+
+```json
+{ "react": { "set": "Counter", "hook": 0, "value": 5 } }
+{ "react": { "set": "Header", "prop": "title", "value": "Draft" } }
+{ "react": { "set": "Settings", "hook": "2.user.name", "value": "Ada" } }
+{ "react": { "set": "Forest", "hook": "35.shelved", "js": "new Set(['a'])" } }
+```
+
+The reply names what changed: `hook 0 of Counter [c3] set to 5`. Only `useState` and `useReducer` hooks hold state that can be set. A hook of another kind is refused, and `inspect` shows which is which. A prop stays changed until the component's parent renders it again. A context's value is its provider's `value` prop, so setting that changes what every component reading it sees. A provider is named as the tree shows it: `ThemeContext.Provider` for a context with a `displayName`, else `Context (from ThemeProvider).Provider`.
+
+If the change makes the app throw, the step says so, and says whether an error boundary caught it or React unmounted the tree.
+
+`suspend` and `error` act on the nearest boundary around the component, and the reply names it: `Suspense [c14] in App shows its fallback`. An error boundary is a class component with `getDerivedStateFromError` or `componentDidCatch`. With none around the component, the step fails and says so. A forced error lasts until `{ "error": false }`, or until the app resets the boundary itself, and what the boundary holds then mounts again from scratch. The error React logs for it is weblab's, and is left out of the console log.
+
+### Components from libraries
+
+`tree` and `renders` leave out components from `node_modules`, like a UI kit's buttons or a router's internals, and show what those render in their place. A line at the end says how many were left out. Named by an element, `inspect` goes to the app's own component and names the library's on its `via` line.
+
+`inspect` shows a library's custom hook as one line, with the state it holds (and, for a query, its key), rather than every hook inside it:
+
+```text
+hooks
+  0-4 useQuery ["products"] → { status: "success", data: Array(6), error: null }
+```
+
+`"library": true` takes library components in, in all of these. A reply about a boundary from a library names its package.
+
+weblab tells a library's components by the file their code is in. When a bundler packs `node_modules` into chunks of its own, weblab finds the file through the chunks' source maps. This goes for server components too. A tool that renders with its own production build of React next to the app's development build (a framework's development overlay, say) is left out whole, with everything it renders.
+
+### Server components
+
+A React server component runs on the server, so the page has what it rendered but not the component itself. The tree shows it where it rendered, marked `(server)`, with its props:
+
+```text
+- root #document
+  - RootLayout (server)
+    - Home (server)
+      - Heading (server) text="Welcome"
+      - Counter label="clicks" [c47]
+```
+
+It has no id, as there is nothing of it in the page to inspect or change, and asking to inspect one by name says so. `{ "react": { "tree": "Home" } }` shows what it rendered. A client component it rendered names it among its owners, and its `used at` line points at the server component's file, and at the line too when the server's code has a source map. Named by an element a server component wrote, `inspect` opens the client component around the element and names the server component on its `written` line. Server components don't render in the page, so `renders` doesn't count them.
+
+### How weblab sees React
+
+React looks for a hook in the page as it loads, the one React DevTools installs, and tells it about every render. weblab puts that hook in each page before the page's own scripts: from the first page, for a project whose `package.json` depends on `react`, and otherwise from the first `react` step on. That is how `renders` sees every render from the first, and how `set`, `suspend` and `error` change things through React itself.
+
+In a browser or app weblab joined with `attach`, the page was already loaded. The components are found from the page, and renders are counted from a hook already there, if there is one (React Refresh's, in a Vite or Next.js dev server). Changing things and naming custom hooks need weblab's hook. `{ "reload": true }` loads the page again with it, and from then on it works as it does from the start. The same goes for a page a `react` step meets before weblab's hook was in it. Whatever weblab added goes when the session ends.
+
+To find a component's code and name its custom hooks, weblab calls the component once more, outside a render, as React DevTools does. Each hook hands back what React holds for it, and the stack of each call says which custom hooks it was called in. `inspect` does this for the component it opens, and `tree` and `renders` once for each kind of component, to tell the app's from a library's. Components are meant to be safe to call like that (React calls them twice in Strict Mode). Anything one logs meanwhile is left out, but other side effects of rendering happen again.
+
+In what weblab prints, text under names that hold secrets, like `password`, `token` or `apiKey`, is shown as `[redacted]`. `weblab.react` hands back the values as they are. A context without a `displayName` is named after the component that provides it: `Context (from DropsProvider)`.
+
+### weblab.react in code
+
+Every page also has `weblab.react`, for `js` steps and checks:
+
+| Call | Hands back |
+| --- | --- |
+| `weblab.react.find("Cart")` | Each component with that name (or id) as `{ id, name, key, props, state }`. `state` is a class component's state, or a function component's state hooks by number. |
+| `weblab.react.of(element)` | The component that rendered an element, the same way. |
+| `weblab.react.set("Cart", "hook", [0], value)` | What `set` does, with any value code can make. It returns a promise that resolves once React has rendered. |
+| `weblab.react.fiber("Cart")` | React's own record of the component, for code that reads React's internals. |
+| `weblab.react.commits` | How many times React has updated the page since weblab began watching it: since it loaded, in a browser weblab opened. |
+
+```json
+{ "expect": { "js": "weblab.react.find('CartItem').length === 3" } }
+{ "js": "weblab.react.find('Player')[0].props.track.title" }
+```
+
+Props and state are the app's own values. Functions and DOM nodes don't come out of the page, so hand back the part you want: `.props.track.title`, not `.props`.
 
 ## More than one session
 

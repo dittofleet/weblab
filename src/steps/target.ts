@@ -4,10 +4,12 @@
 //
 //   "button.save"                         a Playwright selector
 //   "e12"                                 a ref printed by the `look` step
+//   "c12"                                 a component id printed by `react`
 //   { "role": "button", "name": "Save" }  an accessible role and name
 //   { "label": "Email" }                  a form field by its label
 //   { "placeholder": "Search" }, { "text": "Sign in" }, { "testId": "cart" },
 //   { "altText": "Logo" }, { "title": "Close" }
+//   { "component": "CartItem" }           a React component, by name or id
 //
 // plus, on any object form but a ref: `nth` (which match, from 0),
 // `frame` (an iframe to look inside), `within` (another target to look
@@ -23,7 +25,7 @@ import type { ActionContext } from "../types.ts";
 import { bad, isObject, pick } from "./args.ts";
 
 /** Every way to name an element in object form. */
-export const WAYS = ["ref", "selector", "role", "label", "placeholder", "text", "testId", "altText", "title"] as const;
+export const WAYS = ["ref", "selector", "role", "label", "placeholder", "text", "testId", "altText", "title", "component"] as const;
 type Way = (typeof WAYS)[number];
 
 type TargetSpec = Partial<Record<Way, string>> & {
@@ -46,7 +48,10 @@ type Target = string | TargetSpec;
 export const TARGET_KEYS = [...WAYS, "name", "nth", "exact", "frame", "within", "target", "level", "checked", "pressed", "expanded", "selected", "disabled"];
 
 
-const REF = /^(f\d+)?e\d+$/;
+/** A ref, as `look` prints them: e12, or f2e12 in another document. */
+export const REF = /^(f\d+)?e\d+$/;
+/** A component id, as the react step prints them: c12. */
+export const COMPONENT_ID = /^c\d+$/;
 const SHAPE = `a selector, a ref, or { ${WAYS.join(" | ")} }`;
 
 /** True when the step's arguments name an element, leaving out keys the step reads for itself. */
@@ -114,6 +119,7 @@ export function locate(
 
   if (typeof target === "string") {
     if (REF.test(target)) return byRef(ctx, target);
+    if (COMPONENT_ID.test(target)) return ctx.page.locator(`component=${target}`);
     return one(ctx.page.locator(target));
   }
   if (!isObject(target)) return bad(action, SHAPE);
@@ -151,6 +157,9 @@ export function locate(
       return one(scope.getByAltText(value, { exact }), spec.nth);
     case "title":
       return one(scope.getByTitle(value, { exact }), spec.nth);
+    case "component":
+      // The first element each instance renders, by the engine src/react/page.ts registers.
+      return one(scope.locator(`component=${value}`), spec.nth);
     default:
       return bad(action, SHAPE);
   }

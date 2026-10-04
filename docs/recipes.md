@@ -6,6 +6,9 @@ Many recipes use the [code steps](code.md). That is deliberate: when no named st
 
 - [See what a page looks like right now](#see-what-a-page-looks-like-right-now)
 - [Find out why something failed](#find-out-why-something-failed)
+- [Find the component and file behind something on the page](#find-the-component-and-file-behind-something-on-the-page)
+- [Find what renders too often](#find-what-renders-too-often)
+- [Show a React loading or error state](#show-a-react-loading-or-error-state)
 - [Make screenshots steady](#make-screenshots-steady)
 - [Show a state without the backend](#show-a-state-without-the-backend)
 - [Try dark mode, a phone, or another language](#try-dark-mode-a-phone-or-another-language)
@@ -58,6 +61,77 @@ Look at the screenshot first. The session is still open, at the page as it was, 
 - `console/<session>.log` in the session's files directory has each step as it ran, the page's console output, page errors, dialogs and failed requests.
 - `network/<session>.log` has every response: status, method and URL, with `(mocked)` on those a `mock` answered.
 - A session opened with `"trace": "on-failure"` keeps `traces/<session>.zip` when a step fails, written when the session ends: a screenshot, the DOM and the network for every action. Open it at [trace.playwright.dev](https://trace.playwright.dev), which reads the file in the browser without uploading it.
+
+## Find the component and file behind something on the page
+
+In a React app, name the element as any step would, and `inspect` says which component rendered it and where its code is:
+
+`run`
+
+```json
+{ "steps": [{ "react": { "inspect": { "role": "button", "name": "Add Mug" } } }] }
+```
+
+```text
+ProductCard [c40] memo, compiled by React Compiler
+source   src/components/ProductCard.tsx:7:22
+used at  src/components/ProductGrid.tsx:14:9
+owners   ProductGrid < App
+...
+```
+
+To see how the page is put together first, `{ "react": "tree" }` shows the app's components with an id for each, and `{ "react": { "inspect": "c40" } }` opens one.
+
+## Find what renders too often
+
+Ask once to start counting from now, do the thing, and ask again:
+
+`run`
+
+```json
+{ "steps": [{ "react": "renders" }, { "click": { "role": "button", "name": "Add Mug" } }, { "react": "renders" }] }
+```
+
+```text
+1 commit since the last time asked (1.4 ms rendering), 9 components rendered
+  ProductCard ×6 [c12 …]     6×    0.7 ms  6× props changed: onAdd
+  App [c1]                   1×    0.3 ms  state changed: hook 2 (useCart › useState) [] → Array(1)
+  ProductGrid [c6]           1×   <0.1 ms  props changed: onAdd
+  Cart [c9]                  1×   <0.1 ms  props changed: lines
+```
+
+Only the cart changed, but every `ProductCard` rendered: `onAdd` is a new function each time `App` renders, which defeats `memo`. `props new but equal` and `parent rendered (props equal)` mark other renders that could be saved. To look at one part of the page, name it: `{ "react": { "renders": "ProductGrid" } }`.
+
+A component that renders while nothing is happening points to a loop or a timer. To catch one, ask, `wait` a second, and ask again.
+
+## Show a React loading or error state
+
+`suspend` makes a Suspense boundary show its fallback, and `error` makes an error boundary show its error state (with React 18 or later), for as long as it takes to look:
+
+`run`
+
+```json
+{
+  "steps": [
+    { "react": { "suspend": "ProductGrid" } },
+    { "shot": "loading" },
+    { "react": { "suspend": false } },
+    { "react": { "error": "Checkout" } },
+    { "shot": "checkout-error" },
+    { "react": { "error": false } }
+  ]
+}
+```
+
+A state that is hard to reach can often be set directly. `inspect` gives each hook a number:
+
+```json
+{ "react": { "set": "Cart", "hook": 0, "value": [] } }
+{ "react": { "set": "AuthProvider", "hook": "1.isLoading", "value": true } }
+{ "react": { "set": "ThemeContext.Provider", "prop": "value", "value": "dark" } }
+```
+
+The second shows the app while it is still signing in, by holding an auth library's provider in its loading state. The third changes a context, which every component reading it sees. A provider is named as `{ "react": "tree" }` prints it.
 
 ## Make screenshots steady
 
@@ -524,7 +598,15 @@ Start the app with a debugging port, then attach:
 
 An app just started may still be loading, a fresh dev build especially. `{ "ready": true }` waits for it to show something, and `{ "video": "start" }` waits the same way before it records.
 
-An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. If the app is also started with `--inspect=9229` and the session opened with `"inspect": 9229`, steps can run code in its main process. `{ "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: true }))" }` answers its native file dialogs until the session ends. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
+An attached app has a real window, so `{ "shot": { "as": "menu", "screen": true } }` captures its native menus too. If the app is also started with `--inspect=9229` and the session opened with `"mainProcess": 9229`, steps can run code in its main process. `{ "electron": "stub(dialog, 'showOpenDialog', async () => ({ canceled: true }))" }` answers its native file dialogs until the session ends. Ending the session lets go of the app, which keeps running. [Sessions](sessions.md#running-browsers-and-electron-apps) covers starting apps with a port, picking a window, and what is different when attached.
+
+In a React app, `{ "reload": true }` once after attaching lets the `react` step change props and state and name custom hooks, as it does in a browser weblab opens.
+
+An app's renderer can also run in a plain browser session, when its dev server serves it, with a stub of what the app's preload puts on `window`. Record what the real API answers (attached, with `js` steps), write the stub to a file, and give it as `init`:
+
+```json
+{ "name": "renderer", "address": 5173, "start": "pnpm exec vite --config vite.renderer.config.ts --port $PORT", "init": "/tmp/preload-stub.js" }
+```
 
 ## Get past an Electron app's native dialogs, offline
 
@@ -533,7 +615,7 @@ No step can click a native file picker or message box, and a flow that downloads
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "inspect": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
 ```
 
 `run`
