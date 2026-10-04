@@ -1,0 +1,1 @@
+[{ "upload": { "selector": "#file", "file": "note.txt" } }, { "expect": { "selector": "#picked", "text": "note.txt" } }]

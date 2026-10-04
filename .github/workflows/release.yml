@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # On macOS, so the binaries can be signed where they are built.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build all targets
+        run: bun scripts/build.ts darwin-arm64 darwin-x64
+      # A binary that still reaches into node_modules runs fine here and
+      # nowhere else, so it is tried with them gone.
+      - name: Check the binary stands alone
+        run: |
+          rm -rf node_modules
+          test "$(dist/weblab-darwin-arm64 --version)" = "${GITHUB_REF_NAME#v}"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/weblab-*

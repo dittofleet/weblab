@@ -1,0 +1,11 @@
+[
+  {
+    "goto": "/"
+  },
+  {
+    "expect": {
+      "selector": "#signed",
+      "text": "signed in as ada"
+    }
+  }
+]

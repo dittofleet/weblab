@@ -1,0 +1,349 @@
+[
+  {
+    "goto": "/"
+  },
+  {
+    "note": "targets by label, role, placeholder and test id",
+    "fill": {
+      "label": "Name",
+      "value": "by label"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#echo",
+      "text": "hello by label"
+    }
+  },
+  {
+    "click": {
+      "role": "button",
+      "name": "count 0"
+    }
+  },
+  {
+    "expect": {
+      "role": "button",
+      "name": "count 1",
+      "count": 1
+    }
+  },
+  {
+    "note": "a double click is a click with count 2",
+    "click": {
+      "testId": "dbl",
+      "count": 2
+    }
+  },
+  {
+    "expect": {
+      "testId": "dbl",
+      "text": "dbl 1"
+    }
+  },
+  {
+    "select": {
+      "label": "Size",
+      "option": "Large"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#size",
+      "value": "l"
+    }
+  },
+  {
+    "expect": {
+      "label": "Size",
+      "value": "Large"
+    }
+  },
+  {
+    "check": {
+      "label": "Agree"
+    }
+  },
+  {
+    "expect": {
+      "label": "Agree",
+      "checked": true
+    }
+  },
+  {
+    "check": {
+      "selector": "#agree",
+      "checked": false
+    }
+  },
+  {
+    "expect": {
+      "selector": "#agree",
+      "checked": false
+    }
+  },
+  {
+    "expect": {
+      "selector": "#inc",
+      "enabled": true
+    }
+  },
+  {
+    "note": "dialogs are dismissed until told otherwise",
+    "click": "#ask"
+  },
+  {
+    "expect": {
+      "selector": "#answer",
+      "text": "no"
+    }
+  },
+  {
+    "dialog": "accept"
+  },
+  {
+    "click": "#ask"
+  },
+  {
+    "expect": {
+      "selector": "#answer",
+      "text": "yes"
+    }
+  },
+  {
+    "note": "an element inside an iframe",
+    "click": {
+      "role": "button",
+      "name": "Inner",
+      "frame": "#frame"
+    }
+  },
+  {
+    "expect": "pressed"
+  },
+  {
+    "drag": {
+      "from": "#card",
+      "to": "#bin"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#bin",
+      "text": "dropped"
+    }
+  },
+  {
+    "note": "a point, for canvases",
+    "click": {
+      "x": 5,
+      "y": 5
+    }
+  },
+  {
+    "scroll": {
+      "selector": "#list",
+      "by": {
+        "y": 100
+      }
+    }
+  },
+  {
+    "expect": {
+      "js": "document.querySelector('#list').scrollTop > 0"
+    }
+  },
+  {
+    "mock": {
+      "url": "**/api/me",
+      "json": {
+        "name": "mocked"
+      }
+    }
+  },
+  {
+    "click": "#who"
+  },
+  {
+    "expect": {
+      "selector": "#me",
+      "text": "mocked"
+    }
+  },
+  {
+    "mock": {
+      "url": "**/api/me",
+      "off": true
+    }
+  },
+  {
+    "click": "#who"
+  },
+  {
+    "expect": {
+      "selector": "#me",
+      "text": "real"
+    }
+  },
+  {
+    "expect": {
+      "request": "**/api/me",
+      "status": 200
+    }
+  },
+  {
+    "expect": {
+      "console": "fixture mounted"
+    }
+  },
+  {
+    "expect": {
+      "noErrors": true
+    }
+  },
+  {
+    "note": "a download, in code",
+    "playwright": "const [file] = await Promise.all([page.waitForEvent('download'), page.click('#save')]); await file.saveAs(ctx.artifacts.dir + '/downloads/note.txt'); return file.suggestedFilename()"
+  },
+  {
+    "click": "#pop"
+  },
+  {
+    "tab": "new"
+  },
+  {
+    "expect": {
+      "title": "other"
+    }
+  },
+  {
+    "expect": {
+      "url": {
+        "regex": "/other$"
+      }
+    }
+  },
+  {
+    "expect": {
+      "url": "/other"
+    }
+  },
+  {
+    "expect": {
+      "url": "http://localhost:*/other"
+    }
+  },
+  {
+    "tab": {
+      "close": true
+    }
+  },
+  {
+    "expect": {
+      "title": "fixture"
+    }
+  },
+  {
+    "playwright": "await page.getByRole('button', { name: /count/ }).click(); await step({ expect: { selector: '#inc', text: 'count 2' } })"
+  },
+  {
+    "js": "document.title = 'set by js'"
+  },
+  {
+    "expect": {
+      "title": "set by js"
+    }
+  },
+  {
+    "css": "#inc { visibility: hidden }"
+  },
+  {
+    "expect": {
+      "hidden": "#inc"
+    }
+  },
+  {
+    "cdp": {
+      "method": "Emulation.setCPUThrottlingRate",
+      "params": {
+        "rate": 2
+      }
+    }
+  },
+  {
+    "colorScheme": "dark"
+  },
+  {
+    "expect": {
+      "js": "matchMedia('(prefers-color-scheme: dark)').matches"
+    }
+  },
+  {
+    "scroll": {
+      "to": "bottom"
+    }
+  },
+  {
+    "viewport": {
+      "width": 500,
+      "height": 400
+    }
+  },
+  {
+    "expect": {
+      "js": "innerWidth === 500"
+    }
+  },
+  {
+    "click": "#signin"
+  },
+  {
+    "expect": {
+      "selector": "#signed",
+      "text": "signed in as ada"
+    }
+  },
+  {
+    "saveState": "ada"
+  },
+  {
+    "look": "page"
+  },
+  {
+    "reload": true
+  },
+  {
+    "shot": {
+      "as": "dbl",
+      "role": "button",
+      "name": "dbl 0"
+    }
+  },
+  {
+    "shot": {
+      "as": "nested",
+      "target": {
+        "role": "button",
+        "name": "dbl 0"
+      }
+    }
+  },
+  {
+    "fill": {
+      "selector": "#name",
+      "value": ""
+    }
+  },
+  {
+    "type": {
+      "value": "Ada",
+      "label": "Name"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#echo",
+      "text": "hello Ada"
+    }
+  }
+]

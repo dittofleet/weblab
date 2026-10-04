@@ -1,0 +1,14 @@
+[
+  {
+    "fill": {
+      "selector": "#name",
+      "value": "${who}"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#echo",
+      "text": "hello ${who}"
+    }
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "goto": "/"
+  },
+  {
+    "expect": {
+      "js": "matchMedia('(prefers-color-scheme: dark)').matches"
+    }
+  },
+  {
+    "expect": "Fixture app"
+  },
+  {
+    "click": "#inc"
+  },
+  {
+    "click": "#inc"
+  },
+  {
+    "click": "#inc"
+  },
+  {
+    "expect": {
+      "selector": "#inc",
+      "text": "count 3"
+    }
+  },
+  {
+    "include": {
+      "file": "../files/greet.json",
+      "who": "weblab"
+    }
+  },
+  {
+    "upload": {
+      "selector": "#file",
+      "file": "../files/note.txt"
+    }
+  },
+  {
+    "expect": {
+      "selector": "#picked",
+      "text": "note.txt: kept beside the scenario"
+    }
+  },
+  {
+    "press": "?"
+  },
+  {
+    "expect": {
+      "title": "help open"
+    }
+  },
+  {
+    "expect": {
+      "noText": "chords"
+    }
+  },
+  {
+    "shot": "done"
+  },
+  {
+    "shot": {
+      "as": "button",
+      "selector": "#inc"
+    }
+  }
+]

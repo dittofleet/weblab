@@ -1,0 +1,16 @@
+[
+  {
+    "goto": "/"
+  },
+  {
+    "expect": {
+      "selector": "#inc",
+      "text": "count 9"
+    },
+    "timeout": 500,
+    "message": "the counter never reached 9"
+  },
+  {
+    "shot": "never"
+  }
+]
