@@ -191,8 +191,6 @@ export type SessionHandle = Pick<ActionContext, "name" | "locate" | "cdp" | "ste
 
 // What it resolves to is the step's value: what a code step returns, or the text a `look` read.
 export type Action = ((ctx: ActionContext, args: any) => Promise<unknown>) & {
-  /** One line on what it does and takes, for the `run` tool's description. */
-  about?: string;
   /** The step takes no argument: `{ "back": true }`. */
   noArgs?: boolean;
 };

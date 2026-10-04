@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { builtinActions } from "../src/steps/index.ts";
 
 // From source by default; WEBLAB_BIN points the same tests at a compiled binary.
 const [bin, ...prefix] = process.env.WEBLAB_BIN ? [resolve(process.env.WEBLAB_BIN)] : ["bun", join(import.meta.dirname, "..", "src", "main.ts")];
@@ -137,13 +138,21 @@ test("it speaks the 2026-07-28 format, and still answers a client that opens wit
   const { result: listed } = await modern.rpc("tools/list");
   assert.deepEqual(listed.tools.map((tool: { name: string }) => tool.name), ["new", "run", "end", "list", "docs"]);
   assert.equal(typeof listed.ttlMs, "number");
-  // Every step is in the run tool's description, so nothing else has to be read to use it.
+  // Every step is named in the run tool's description, and all of every description reaches
+  // the agent: Claude Code cuts a tool's description, and the instructions, at 2048 characters.
   const run = listed.tools.find((tool: { name: string }) => tool.name === "run");
-  for (const step of ["goto", "click", "fill", "expect", "look", "shot", "js", "playwright", "cdp", "mock", "new", "end", "include"]) assert.match(run.description, new RegExp(`^  ${step}: `, "m"));
+  const named = new Set([...run.description.matchAll(/^[A-Z][\w ]+: (.+)$/gm)].flatMap((line) => line[1].replace(/ \(.*/, "").split(", ")));
+  for (const step of [...Object.keys(builtinActions), "include"]) assert.ok(named.has(step), `the run tool's description doesn't name ${step}`);
+  for (const tool of listed.tools) assert.ok(tool.description.length <= 2048, `the ${tool.name} tool's description is ${tool.description.length} characters`);
+  assert.ok(discovered.instructions.length <= 2048, `the instructions are ${discovered.instructions.length} characters`);
   assert.deepEqual(Object.keys(run.inputSchema.properties).sort(), ["file", "params", "session", "steps", "timeout", "wait"]);
 
   // The docs come with it: through a tool, and as resources.
-  assert.match((await modern.tool("docs")).text, /^tools: .*\nsteps: .*\nsessions: .*\ncode: .*\nrecipes: /);
+  assert.match((await modern.tool("docs")).text, /^tools: .*\n  sections: new; .*\nsteps: .*\n  sections: .*\nsessions: .*\n  sections: .*\ncode: .*\n  sections: .*\nrecipes: .*\n  sections: /);
+  assert.match((await modern.tool("docs", { section: "mock" })).text, /^weblab:\/\/docs\/steps#around-the-page\n[\s\S]*^\| `mock` \|/m);
+  const missing = await modern.tool("docs", { section: "clik" });
+  assert.ok(missing.isError);
+  assert.match(missing.text, /did you mean "click"/);
   const stepsPage = (await modern.tool("docs", { page: "steps" })).text;
   assert.match(stepsPage, /^# Steps/);
   assert.match(stepsPage, /\]\(weblab:\/\/docs\/\w+(#[\w-]+)?\)/, "links between pages point at the pages as offered here");

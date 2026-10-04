@@ -114,7 +114,7 @@ async function compare(ctx: ActionContext, shot: string, { file: before, png }: 
 const EXTENSIONS: Record<LookFormat, string> = { refs: "yml", plain: "yml", text: "txt", html: "html" };
 
 export const captureSteps: Record<string, Action> = {
-  look: step(`read the page or an element as text: true, "name", or { as, format, depth, ...target }`, async (ctx, args) => {
+  look: step(async (ctx, args) => {
     const options = isObject(args) ? args : typeof args === "string" ? { as: args } : {};
     const format = (options.format ?? "refs") as LookFormat;
     if (!LOOK_FORMATS.includes(format)) bad("look", `a format of ${LOOK_FORMATS.join(", ")}`);
@@ -129,7 +129,7 @@ export const captureSteps: Record<string, Action> = {
     return text;
   }),
 
-  shot: step(`screenshot the viewport, the full page, an element, or the real screen, and compare it with one taken before: "name" or { as, fullPage, animations, screen, matches, ...target }`, async (ctx, args) => {
+  shot: step(async (ctx, args) => {
     const { as, fullPage, animations, screen, matches, tolerance } = arg<{ as?: string; fullPage?: boolean; animations?: boolean; screen?: boolean | ScreenArea; matches?: string; tolerance?: number }>(args, "as", "shot");
     if (matches !== undefined && typeof matches !== "string") bad("shot", "matches to be the path of a screenshot taken before");
     if (tolerance !== undefined && !(typeof tolerance === "number" && tolerance >= 0 && tolerance <= 1)) bad("shot", "tolerance to be the share of pixels that may differ, from 0 to 1");
@@ -163,7 +163,7 @@ export const captureSteps: Record<string, Action> = {
     if (before !== undefined) await compare(ctx, path, before, String(as), tolerance ?? 0);
   }),
 
-  video: step(`record the tab steps act on, from once the app is ready until stopped: "start", "stop", or { as, ready } to start one named`, async (ctx, args) => {
+  video: step(async (ctx, args) => {
     if (args === "stop") {
       if (!ctx.video) ctx.fail(`nothing is being recorded. Start with { "video": "start" }`);
       for (const path of await ctx.film.stop(ctx.page)) ctx.artifacts.addFile(path);

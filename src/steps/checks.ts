@@ -297,13 +297,13 @@ async function poll(check: () => Promise<boolean>, timeout: number): Promise<boo
 export const EXPECT_KEYS = [...EXPECTATIONS.map(([key]) => key), "text", "status", "timeout", "message"];
 
 export const checkSteps: Record<string, Action> = {
-  wait: step("wait a fixed number of milliseconds: 1000", async (ctx, args) => {
+  wait: step(async (ctx, args) => {
     const { ms } = arg<{ ms: number }>(args, "ms", "wait");
     if (!Number.isFinite(Number(ms))) bad("wait", "a number of milliseconds");
     await ctx.page.waitForTimeout(Number(ms));
   }),
 
-  expect: step(`check something, waiting until it holds: "text", a target, or { hidden | inViewport | url | js | request | console | noErrors | ... }`, async (ctx, given) => {
+  expect: step(async (ctx, given) => {
     // A plain string is text that should be visible.
     const args = typeof given === "string" ? { text: given } : given;
     if (!isObject(args)) bad("expect", `text that should be visible, or { visible | hidden | text | url | js | ... }`);

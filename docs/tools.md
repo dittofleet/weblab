@@ -1,6 +1,6 @@
 # Tools
 
-This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages. It lists every argument, what each reply holds, how weblab finds or starts the app, and where files go.
+This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages, whole or a section at a time. It lists every argument, what each reply holds, how weblab finds or starts the app, and where files go.
 
 A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when the call could not be done, a step that never ran (written wrong, or on a session that isn't open) included, and the text says why. A step that ran and failed is not an error but a result: its `FAIL` line says why, and its screenshot comes with it, which a client showing an error's text alone would leave out.
 
@@ -220,6 +220,35 @@ guest  at http://localhost:5173 (server started by weblab: bun run dev)
 ```
 
 With nothing open, the reply is `no session is open`.
+
+## docs
+
+Hands back these pages, a whole one or one section of one. The same pages are offered as MCP resources, `weblab://docs/<page>`.
+
+| Argument | What it says | Default |
+| --- | --- | --- |
+| `page` | The page to read whole: `tools`, `steps`, `sessions`, `code` or `recipes`. With `section`, the page to look in. | The list of pages |
+| `section` | One section: a step's name, or a heading as it is written (`Refs`) or as a link's anchor (`refs`, `steps#refs`, `weblab://docs/steps#refs`). | |
+
+With neither, the reply lists the pages, each with its sections. A section runs from its heading to the next one, and ends by naming the sections inside it, to read the same way. A step's name gives the section that describes it, with only that step's row in its table of steps:
+
+`docs`
+
+```json
+{ "section": "mock" }
+```
+
+```text
+weblab://docs/steps#around-the-page
+
+## Around the page
+
+| Step | Forms | What it does |
+| --- | --- | --- |
+| `mock` | `{ url, json \| body \| abort \| off, status, contentType }` | Answers matching requests locally, ... |
+```
+
+A step's name is looked for before a heading, so `new` is the step, and the reply ends `Also under that name: weblab://docs/tools#new`, which is a section too. A name that matches nothing is an error that suggests the nearest one.
 
 ## Files
 

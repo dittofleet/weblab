@@ -33,7 +33,7 @@ In a client's JSON config, the server entry is `{ "command": "weblab" }`. Sessio
 | `run` | Runs steps on a session, in order, stopping at the first that fails. Replies with each step's outcome, what it handed back, and its screenshots. |
 | `end` | Ends one session, or all of them. Writes a video still recording and traces, and stops a server nobody else is using. |
 | `list` | The sessions that are open, where each one is, and whether steps are running on it. |
-| `docs` | The reference pages below, readable from inside the client. They are also offered as MCP resources (`weblab://docs/<page>`). |
+| `docs` | The reference pages below, readable from inside the client, whole or a section at a time: `{ "section": "mock" }` is one step's options. They are also offered as MCP resources (`weblab://docs/<page>`). |
 
 ## An example
 
@@ -96,7 +96,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 
 | Page | What's in it |
 | --- | --- |
-| [Tools](docs/tools.md) | Every argument of `new`, `run`, `end` and `list`, what each reply holds, servers, attaching, long runs, and where files go. |
+| [Tools](docs/tools.md) | Every argument of `new`, `run`, `end`, `list` and `docs`, what each reply holds, servers, attaching, long runs, and where files go. |
 | [Steps](docs/steps.md) | Every step and its options, targeting elements, refs, `expect`, `include` and placeholders. |
 | [Sessions](docs/sessions.md) | More than one session: two users, copies of an app, running browsers and Electron apps, other engines, saved sign-ins. |
 | [Code](docs/code.md) | `js`, `css`, `playwright` and `cdp`, and step files written as code. |

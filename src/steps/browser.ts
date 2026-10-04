@@ -8,7 +8,7 @@ import { arg, bad, isObject, step } from "./args.ts";
 
 export const browserSteps: Record<string, Action> = {
   // Until a step says otherwise, dialogs are dismissed (see sessions.ts).
-  dialog: step(`answer alerts, confirms and prompts from now on: "accept", "dismiss", or { accept, text }`, async (ctx, args) => {
+  dialog: step(async (ctx, args) => {
     const policy = typeof args === "string" ? { accept: args === "accept" } : args;
     const named = typeof args !== "string" || args === "accept" || args === "dismiss";
     if (!isObject(policy) || typeof policy.accept !== "boolean" || !named) {
@@ -19,7 +19,7 @@ export const browserSteps: Record<string, Action> = {
     ctx.dialogs.text = policy.text as string | undefined;
   }),
 
-  mock: step("answer matching requests locally: { url, json | body | abort | off, status, contentType }", async (ctx, args) => {
+  mock: step(async (ctx, args) => {
     if (!isObject(args) || typeof args.url !== "string") {
       bad("mock", "{ url, json | body | abort | off, status, contentType }");
     }
@@ -45,7 +45,7 @@ export const browserSteps: Record<string, Action> = {
     });
   }),
 
-  saveState: step(`save cookies and storage under a name, for a session to start from with its state option: "name"`, async (ctx, args) => {
+  saveState: step(async (ctx, args) => {
     const { name } = arg<{ name: string }>(args, "name", "saveState");
     if (typeof name !== "string") bad("saveState", "a name");
     const path = signInPath(ctx.app, name);

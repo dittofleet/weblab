@@ -3,16 +3,8 @@
 import { UsageError } from "../errors.ts";
 import type { Action, ActionContext } from "../types.ts";
 
-/**
- * A built-in step: one line on what it does and takes (shown in the
- * `run` tool's description), the work, and optionally that it takes no
- * argument.
- */
-export const step = (
-  about: string,
-  run: (ctx: ActionContext, args: any) => Promise<unknown>,
-  shape: Pick<Action, "noArgs"> = {},
-): Action => Object.assign(run, { about, ...shape });
+/** A built-in step: the work, and optionally that it takes no argument. */
+export const step = (run: (ctx: ActionContext, args: any) => Promise<unknown>, shape: Pick<Action, "noArgs"> = {}): Action => Object.assign(run, shape);
 
 /** Keys any step may carry beside its action. */
 export const BESIDE_ACTION = ["timeout", "message", "note", "on"];
