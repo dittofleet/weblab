@@ -687,6 +687,27 @@ test("an Electron app's main process runs code beside its window, joined by its 
       await lab.tool("new", { name: "app", attach: window.port, inspect: port });
       assert.match(await inMain("[app.getName(), typeof globalThis[Symbol.for('weblab.stubs')]]"), /\[\s*"fixture",\s*"undefined"\s*\]/);
     }
+    // A promise the code ends with is awaited; evaluations side by side keep their own values.
+    assert.match(await inMain("dialog.showMessageBox({})"), /\{\s*"response": 0\s*\}/);
+    const both = await lab.tool("run", { session: "app", steps: [{ playwright: "return Promise.all([electron('[1, 2]'), electron('({ a: 1 })')])" }] });
+    assert.match(both.text, /\[\s*\[\s*1,\s*2\s*\],\s*\{\s*"a": 1\s*\}\s*\]/);
+    // A stub can't stand in for what can't be replaced, and one over a prototype's method leaves no trace.
+    assert.match(await inMain("stub(Object.freeze({ f() {} }), 'f', () => 1)"), /FAIL {2}1 electron: TypeError: stub: f can't be replaced on this object; it is read-only, or a getter/);
+    await inMain("const Base = class { hi() { return 'base' } }; globalThis.thing = new Base(); stub(thing, 'hi', () => 'stub'); thing.hi()");
+    await lab.tool("end", { session: "app" });
+    await lab.tool("new", { name: "app", attach: window.port, inspect: port });
+    assert.match(await inMain("const own = Object.hasOwn(thing, 'hi'); const said = thing.hi(); delete globalThis.thing; [own, said]"), /\[\s*false,\s*"base"\s*\]/);
+    // A SyntaxError the code throws as it runs isn't a mistake in it: a check keeps trying.
+    const parsed = await lab.tool("run", { session: "app", steps: [{ electron: "setTimeout(() => app.json = '{\"done\": true}', 200); app.json = '{'; 1" }, { expect: { electron: "JSON.parse(app.json).done" } }] });
+    assert.match(parsed.text, /ok {4}2 expect/);
+    // A check's own time bounds each try.
+    const begun = Date.now();
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "await new Promise(() => {})", timeout: 300 } }] })).text, /FAIL {2}1 expect/);
+    assert.ok(Date.now() - begun < 4000, `the expect took ${Date.now() - begun}ms`);
+    // Logged errors and dates read as themselves.
+    await inMain("console.log('at', new Error('save failed'), { s: 'x' }); 1");
+    assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { console: "at Error: save failed" } }, { expect: { console: "{ s: 'x' }" } }] })).text, /ok {4}1 expect[\s\S]*ok {4}2 expect/);
+
     // Truthy as the main process has it.
     assert.match((await lab.tool("run", { session: "app", steps: [{ expect: { electron: "NaN", timeout: 200 } }] })).text, /expected NaN to be truthy in the main process, it was "NaN"/);
 

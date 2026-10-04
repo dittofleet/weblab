@@ -67,7 +67,7 @@ async function visibleText(page: Page, text: string, exact?: boolean): Promise<n
  * timeout runs out; `once` marks a check nothing in the page can
  * change, so it is tried a single time.
  */
-type ExpectationBuilder = (ctx: ActionContext, args: any) => {
+type ExpectationBuilder = (ctx: ActionContext, args: any, timeout?: number) => {
   holds(): Promise<boolean>;
   wanted(): string;
   once?: boolean;
@@ -200,10 +200,12 @@ const EXPECTATIONS: Expectation[] = [
   ],
   [
     "electron",
-    (ctx, { electron: code }) => {
+    (ctx, { electron: code }, timeout = ctx.timeout) => {
       if (typeof code !== "string") bad("expect", `{ "electron": "JavaScript that turns true in the main process" }`);
+      // Each try gets what is left of the expect's time, so one that hangs doesn't outlast it.
+      const deadline = Date.now() + timeout;
       // Truthy as the main process has it: NaN there is falsy, though it comes back as "NaN".
-      return truthyCheck(code, " in the main process", () => ctx.mainProcess().evaluate(code, ctx.timeout));
+      return truthyCheck(code, " in the main process", () => ctx.mainProcess().evaluate(code, Math.max(100, deadline - Date.now())));
     },
   ],
   [
@@ -340,7 +342,7 @@ export const checkSteps: Record<string, Action> = {
       const forms = [...EXPECTATIONS.map(([key, , shape]) => shape ?? key), "text | target + text", "target"];
       return bad("expect", `text that should be visible, or { ${forms.join(" | ")} }`);
     }
-    const { holds, wanted, once } = build(ctx, check);
+    const { holds, wanted, once } = build(ctx, check, timeout ?? ctx.timeout);
     const ok = once ? await holds() : await poll(holds, timeout ?? ctx.timeout);
     if (!ok) ctx.fail(message ?? `expected ${wanted()}`);
   },

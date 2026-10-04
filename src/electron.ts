@@ -25,25 +25,28 @@ export type MainProcess = {
 const MODULES = ["app", "BrowserWindow", "webContents", "ipcMain", "dialog", "Menu", "shell", "session", "clipboard", "nativeTheme", "screen"];
 
 // Run in the app for one session: its `stub(object, name, replacement)`,
-// and what puts back all it stubbed. Each stubbed property keeps its
-// original and a layer per stub over it, whichever session made it, so
-// sessions that stub the same thing can end in any order: the property
-// shows the newest layer left, else the original. One that something
-// else has replaced since is left as that has it. It all lives in one
-// property of the app's global, under a symbol of weblab's, gone once
-// nothing is stubbed.
+// and what puts back all it stubbed. Each stubbed property keeps how it
+// was (its own property, or none, when it came from a prototype) and a
+// layer per stub over it, whichever session made it, so sessions that
+// stub the same thing can end in any order: the property shows the
+// newest layer left, else is as it was. One that something else has
+// replaced since is left as that has it. It all lives in one property
+// of the app's global, under a symbol of weblab's, gone once nothing is
+// stubbed.
 const STUBS_FOR = `(session) => {
   const key = Symbol.for("weblab.stubs");
-  const all = () => (globalThis[key] ??= { slots: new WeakMap(), sessions: {} });
   const stub = (object, name, replacement) => {
-    const { slots, sessions } = all();
+    const own = Object.getOwnPropertyDescriptor(object, name);
+    try {
+      object[name] = replacement;
+    } catch {}
+    if (object[name] !== replacement) throw new TypeError("stub: " + String(name) + " can't be replaced on this object; it is read-only, or a getter");
+    const { slots, sessions } = (globalThis[key] ??= { slots: new WeakMap(), sessions: {} });
     let props = slots.get(object);
     if (props === undefined) slots.set(object, (props = new Map()));
-    let slot = props.get(name);
-    if (slot === undefined) props.set(name, (slot = { original: object[name], layers: [] }));
-    slot.layers.push({ session, replacement });
+    if (!props.has(name)) props.set(name, { own, layers: [] });
+    props.get(name).layers.push({ session, replacement });
     (sessions[session] ??= []).push([object, name]);
-    object[name] = replacement;
   };
   const unstub = () => {
     const stubs = globalThis[key];
@@ -57,7 +60,9 @@ const STUBS_FOR = `(session) => {
       const [layer] = slot.layers.splice(at, 1);
       const shown = at === slot.layers.length && object[name] === layer.replacement;
       try {
-        if (shown) object[name] = slot.layers.length > 0 ? slot.layers[slot.layers.length - 1].replacement : slot.original;
+        if (shown && slot.layers.length > 0) object[name] = slot.layers[slot.layers.length - 1].replacement;
+        else if (shown && slot.own === undefined) delete object[name];
+        else if (shown) Object.defineProperty(object, name, slot.own);
       } catch {}
       if (slot.layers.length === 0) props.delete(name);
       if (props.size === 0) stubs.slots.delete(object);
@@ -159,21 +164,25 @@ type Preview = {
   entries?: { key?: Preview; value: Preview }[];
 };
 
-// A logged object as Node's console would print it, from the debugger's preview of it.
+// What reads as itself, not as its properties: an error (with its stack), a date, a pattern.
+const SELF_DESCRIBED = ["error", "date", "regexp"];
+
+// A logged object much as Node's console prints it, from the debugger's
+// preview of it, which goes one level deep.
 function previewText(preview: Preview): string {
   const more = preview.overflow ? ", ..." : "";
   if (preview.entries !== undefined) {
     const entries = preview.entries.map(({ key, value }) => (key === undefined ? previewText(value) : `${previewText(key)} => ${previewText(value)}`));
     return `${preview.description} { ${entries.join(", ")}${more} }`;
   }
-  if (preview.type !== "object" || preview.subtype === "null") return preview.description ?? "";
+  if (preview.type !== "object" || preview.subtype === "null" || SELF_DESCRIBED.includes(preview.subtype ?? "")) return preview.description ?? "";
   const values = preview.properties.map((property) => {
-    const value = property.valuePreview !== undefined ? previewText(property.valuePreview) : property.type === "string" ? JSON.stringify(property.value) : (property.value ?? "");
+    const value = property.valuePreview !== undefined ? previewText(property.valuePreview) : property.type === "string" ? `'${property.value}'` : (property.value ?? "");
     return preview.subtype === "array" ? value : `${property.name}: ${value}`;
   });
-  if (preview.subtype === "array") return `[ ${values.join(", ")}${more} ]`;
+  if (preview.subtype === "array") return values.length === 0 ? "[]" : `[ ${values.join(", ")}${more} ]`;
   const kind = preview.description === "Object" ? "" : `${preview.description} `;
-  return `${kind}{ ${values.join(", ")}${more} }`;
+  return values.length === 0 && more === "" ? `${kind}{}` : `${kind}{ ${values.join(", ")}${more} }`;
 }
 
 // One argument of a console call as it reads: a string as it is, anything else as Node would print it.
@@ -211,6 +220,18 @@ const truthy = (remote: Remote): boolean => {
   return remote.objectId !== undefined || Boolean(remote.value);
 };
 
+// How long joining the main process may take.
+const JOIN_TIMEOUT = 10_000;
+
+// Work that has to be done in time, or fails with what `late` says.
+function within<T>(work: Promise<T>, ms: number, late: () => Error): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, failed) => {
+    timer = setTimeout(() => failed(late()), ms);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
 // An error as the step reports it: its own frames, without the ones of the code weblab wrapped.
 const errorText = (description: string) => description.split("\n").filter((line) => !/^\s+at .*<anonymous>/.test(line)).join("\n");
 
@@ -219,11 +240,17 @@ const errorText = (description: string) => description.split("\n").filter((line)
  * What it logs from now on goes to `log`. `session` names what the code stubs.
  */
 export async function joinMainProcess(inspect: string, session: string, log: (type: string, text: string) => void): Promise<MainProcess> {
+  // An app paused in a debugger, or busy, doesn't answer: said, rather than waited on for ever.
+  const unanswered = () => new SetupError(`the main process at ${inspect} didn't answer within ${JOIN_TIMEOUT / 1000}s; is it paused in a debugger, or busy?`);
   const socket = new WebSocket(await socketAddress(inspect));
-  await new Promise<void>((done, failed) => {
-    socket.onopen = () => done();
-    socket.onerror = () => failed(new SetupError(`could not join the main process at ${inspect}`));
-  });
+  await within(
+    new Promise<void>((done, failed) => {
+      socket.onopen = () => done();
+      socket.onerror = () => failed(new SetupError(`could not join the main process at ${inspect}`));
+    }),
+    JOIN_TIMEOUT,
+    unanswered,
+  );
   // Once it goes, it is gone: an app that quit or restarted is another session's.
   let gone: string | null = null;
   let next = 0;
@@ -256,7 +283,9 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
       socket.send(JSON.stringify({ id, method, params }));
     });
 
-  const GROUP = "weblab";
+  // Each evaluation keeps the objects it made in a group of its own, let
+  // go of when it is done, so evaluations side by side keep theirs.
+  let groups = 0;
 
   // What the code handed back, or threw, as data.
   async function asData(remote: Remote): Promise<unknown> {
@@ -267,47 +296,51 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     return copied.result?.result?.value ?? remote.description;
   }
 
-  async function failure(exception: Remote | undefined, text: string): Promise<Error> {
+  // Code that doesn't compile is the author's mistake, told about the
+  // code as written, not the block it is put in. A script can't await,
+  // which a step can, so code that awaits is read as an async function's
+  // body; what reads well that way but not in a block (a return) is told
+  // as the block found it.
+  async function mistake(code: string, found: Remote): Promise<UsageError> {
+    const read = await send("Runtime.compileScript", { expression: /\bawait\b/.test(code) ? `(async () => {\n${code}\n})` : code, sourceURL: "", persistScript: false });
+    const description = errorText((read.result?.exceptionDetails?.exception as Remote | undefined)?.description ?? found.description ?? "");
+    const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value; it needs no return)" : "";
+    return new UsageError(`electron: ${description}${hint}`);
+  }
+
+  async function failure(code: string, exception: Remote | undefined, text: string): Promise<Error> {
     if (exception === undefined) return new StepFailure(text);
-    const description = errorText(exception.description ?? text);
-    if (exception.className === "SyntaxError") {
-      const hint = /Illegal return/.test(description) ? " (an electron step hands back its last statement's value; it needs no return)" : "";
-      return new UsageError(`electron: ${description}${hint}`);
-    }
-    if (exception.subtype === "error") return new StepFailure(description);
+    // One the code didn't compile with has no frames; one it threw as it ran (JSON.parse's) has.
+    if (exception.className === "SyntaxError" && !/\n\s+at /.test(exception.description ?? "")) return mistake(code, exception);
+    if (exception.subtype === "error") return new StepFailure(errorText(exception.description ?? text));
     return new StepFailure(`threw ${JSON.stringify(await asData(exception).catch(() => exception.description))}`);
   }
 
-  // Code read once is known to be well formed; an expect polling it isn't read again.
-  const wellFormed = new Set<string>();
-
   async function evaluate(code: string, timeout: number): Promise<{ value: unknown; truthy: boolean }> {
-    // Read first as written, so a mistake is said about the code itself, not the block it is put in.
-    // A script can't await, which a step can: code that reads as an async
-    // function's body is no mistake, and one that awaits is told as that.
-    const compile = async (expression: string) =>
-      (await send("Runtime.compileScript", { expression, sourceURL: "", persistScript: false })).result?.exceptionDetails as { text: string; exception?: Remote } | undefined;
-    if (!wellFormed.has(code)) {
-      const asScript = await compile(code);
-      const asBody = asScript === undefined ? undefined : await compile(`(async () => {\n${code}\n})`);
-      if (asScript !== undefined && asBody !== undefined) {
-        const mistake = /\bawait\b/.test(code) ? asBody : asScript;
-        throw await failure(mistake.exception, mistake.text);
-      }
-      wellFormed.add(code);
-    }
+    const group = `weblab-${(groups += 1)}`;
     const begun = Date.now();
+    let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Objects it handed back or threw are held in the app until let go of.
     let held = false;
+    // The code's value, awaited when it is a promise, as a function's would be.
+    const run = async (): Promise<Message> => {
+      const reply = await send("Runtime.evaluate", { expression: wrapped(code, session), includeCommandLineAPI: true, replMode: true, awaitPromise: true, objectGroup: group, timeout });
+      const result = reply.result?.result as Remote | undefined;
+      if (reply.result?.exceptionDetails !== undefined || result?.subtype !== "promise") return reply;
+      return send("Runtime.awaitPromise", { promiseObjectId: result.objectId });
+    };
     // Past the timeout, code is either busy (a loop after an await, which
     // the debugger's own timeout doesn't cover) or waiting. Busy code keeps
     // the event loop from turning, and is stopped; code that waits is left.
-    // Never stopped on a guess: a stop the app isn't busy for lands on its next task.
+    // Never stopped on a guess: a stop when the step's code isn't what is
+    // busy lands on the app's own next task, so the loop has to stay
+    // stuck a full second, with the code still running.
     const late = new Promise<never>((_, failed) => {
       timer = setTimeout(async () => {
         const turned = send("Runtime.evaluate", { expression: "new Promise((done) => setImmediate(() => done(true)))", awaitPromise: true, returnByValue: true });
-        const free = await Promise.race([turned.then(() => true, () => true), sleep(500, false)]);
+        const free = await Promise.race([turned.then(() => true, () => true), sleep(1000, false)]);
+        if (settled) return;
         if (free) return failed(new StepFailure(`what the code awaited hadn't settled after ${timeout}ms; it may still settle in the app`));
         await Promise.race([send("Runtime.terminateExecution").catch(() => {}), sleep(1000)]);
         failed(new StepFailure(`the code kept the main process busy past ${timeout}ms, and was stopped`));
@@ -316,32 +349,36 @@ export async function joinMainProcess(inspect: string, session: string, log: (ty
     try {
       // The debugger stops code that keeps the main process busy past the
       // timeout; while it is busy, the app's windows can't respond.
-      const reply = await Promise.race([
-        send("Runtime.evaluate", { expression: wrapped(code, session), includeCommandLineAPI: true, replMode: true, awaitPromise: true, objectGroup: GROUP, timeout }),
-        late,
-      ]);
+      const reply = await Promise.race([run().finally(() => (settled = true)), late]);
       if (reply.error !== undefined) {
         if (Date.now() - begun >= timeout) throw new StepFailure(`the code kept the main process busy for ${timeout}ms, and was stopped`);
         throw new StepFailure(reply.error.message);
       }
       const { result, exceptionDetails } = reply.result as { result: Remote; exceptionDetails?: { text: string; exception?: Remote } };
       held = result.objectId !== undefined || exceptionDetails?.exception?.objectId !== undefined;
-      if (exceptionDetails !== undefined) throw await failure(exceptionDetails.exception, exceptionDetails.text);
+      if (exceptionDetails !== undefined) throw await failure(code, exceptionDetails.exception, exceptionDetails.text);
       return { value: await asData(result), truthy: truthy(result) };
     } finally {
       clearTimeout(timer);
-      if (held) void send("Runtime.releaseObjectGroup", { objectGroup: GROUP }).catch(() => {});
+      if (held) void send("Runtime.releaseObjectGroup", { objectGroup: group }).catch(() => {});
     }
   }
 
   try {
-    // Electron's own main process, rather than some other Node program: one whose electron module has an app.
-    const reply = await send("Runtime.evaluate", { expression: `typeof require("electron").app === "object" ? process.pid : null`, includeCommandLineAPI: true, returnByValue: true });
-    const pid = reply.result?.result?.value;
-    if (typeof pid !== "number") throw new SetupError(`${inspect} is a Node process, but not an Electron app's main process`);
-    // Told when the app is about to exit, so it isn't kept waiting for weblab to let go.
-    await send("NodeRuntime.notifyWhenWaitingForDisconnect", { enabled: true });
-    await send("Runtime.enable");
+    const pid = await within(
+      (async () => {
+        // Electron's own main process, rather than some other Node program: one whose electron module has an app.
+        const reply = await send("Runtime.evaluate", { expression: `typeof require("electron").app === "object" ? process.pid : null`, includeCommandLineAPI: true, returnByValue: true });
+        const found = reply.result?.result?.value;
+        if (typeof found !== "number") throw new SetupError(`${inspect} is a Node process, but not an Electron app's main process`);
+        // Told when the app is about to exit, so it isn't kept waiting for weblab to let go.
+        await send("NodeRuntime.notifyWhenWaitingForDisconnect", { enabled: true });
+        await send("Runtime.enable");
+        return found;
+      })(),
+      JOIN_TIMEOUT,
+      unanswered,
+    );
     return {
       pid,
       evaluate,

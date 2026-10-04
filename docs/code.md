@@ -128,7 +128,7 @@ An Electron app runs its windows' pages in Chromium, and everything else in its 
 { "name": "app", "attach": 9222, "inspect": 9229 }
 ```
 
-The code is statements, and the value of the last one is handed back, with no `return`; `await` works anywhere in it. `electron` is the electron module, and `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen` are its parts by name. `require` works too, and so does [`stub`](#stubs). What the code declares with `const`, `let` and `class` stays in it, and may reuse those names; `var` and `function` declarations become the app's globals, as in any script. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
+The code is statements, and the value of the last one is handed back, with no `return`, and awaited when it is a promise; `await` works anywhere in it. `electron` is the electron module, and `app`, `BrowserWindow`, `webContents`, `ipcMain`, `dialog`, `Menu`, `shell`, `session`, `clipboard`, `nativeTheme` and `screen` are its parts by name. `require` works too, and so does [`stub`](#stubs). What the code declares with `const`, `let` and `class` stays in it, and may reuse those names; `var` and `function` declarations become the app's globals, as in any script. A longer script can live in a file: `{ "electron": { "file": "seed.js" } }`.
 
 `run`
 
@@ -147,9 +147,9 @@ The code is statements, and the value of the last one is handed back, with no `r
 }
 ```
 
-Data comes back as it is, and anything that isn't data as what it is, however deep: `[BrowserWindow]`, `[Function save]`, `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, a date as its ISO string, a set as a list, and a map as an object when its keys are strings. A mistake in the code is refused before it runs, in the app's own words; an error it throws fails the step with its message.
+Data comes back as it is, and anything that isn't data as what it is, however deep: `[BrowserWindow]`, `[Function save]`, `[Circular]`. `NaN`, `Infinity` and BigInts come back as text, a date as its ISO string, a set as a list, and a map as an object when its keys are strings. Code that doesn't compile is refused, in the app's own words; an error it throws as it runs fails the step with its message.
 
-What the main process logs goes to the session's console log, and so to the reply, as `[main console.log] ...`, formatted as Node's console would. It counts as the page's does: `ignore` applies to it, `{ "expect": { "console": ... } }` waits for it, and a `console.error` fails `noErrors`, which is where an IPC handler that throws shows. Every session joined to one app sees all of what its main process logs.
+What the main process logs goes to the session's console log, and so to the reply, as `[main console.log] ...`, much as Node's console prints it, one level deep. It counts as the page's does: `ignore` applies to it, `{ "expect": { "console": ... } }` waits for it, and a `console.error` fails `noErrors`, which is where an IPC handler that throws shows. Every session joined to one app sees all of what its main process logs.
 
 `{ "expect": { "electron": "code" } }` waits until code in the main process is truthy, as `{ "expect": { "js": ... } }` does in the page.
 
@@ -189,7 +189,7 @@ What joining the main process means:
 }
 ```
 
-A replacement that wants the original keeps it first, as the `fetch` one does. Logging from it is how a check sees that it was called. A stubbed method put back by something else in the meantime is left as that has it.
+A replacement that wants the original keeps it first, as the `fetch` one does. Logging from it is how a check sees that it was called. A property that can't be replaced (read-only, or a getter, as the electron module's own parts are: stub `dialog.showOpenDialog`, not `electron.dialog`) is refused. When the session ends, the property is as it was, even one that came from a prototype; one something else has replaced in the meantime is left as that has it.
 
 ## Code files
 
