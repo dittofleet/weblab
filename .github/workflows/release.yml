@@ -13,6 +13,24 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
+      # A release is a tag on main, nothing more: the build stamps the tag in as the version.
+      - name: Ensure release tag is on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS=$(gh api "repos/${{ github.repository }}/compare/main...${{ github.sha }}" --jq .status)
+          if [ "$STATUS" != "identical" ] && [ "$STATUS" != "behind" ]; then
+            echo "Release tag must point to a commit on main (got: $STATUS)."
+            exit 1
+          fi
+      - name: Ensure tag is semver
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '$TAG' is not vX.Y.Z."
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Build all targets

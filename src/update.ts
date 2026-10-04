@@ -3,8 +3,8 @@
 // one, so a reply can say there is one.
 import { spawnSync } from "node:child_process";
 import { chmodSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import manifest from "../package.json" with { type: "json" };
 import { readRecord, writeRecord } from "./state.ts";
+import { VERSION } from "./version.ts";
 
 const REPO = "dittofleet/weblab";
 const DAY_MS = 24 * 60 * 60_000;
@@ -37,8 +37,8 @@ export async function update(): Promise<number> {
     return 1;
   }
   const latest = await latestVersion();
-  if (!newer(latest, manifest.version)) {
-    console.log(`weblab ${manifest.version} is the latest.`);
+  if (!newer(latest, VERSION)) {
+    console.log(`weblab ${VERSION} is the latest.`);
     return 0;
   }
   const arch = process.arch === "arm64" ? "arm64" : "x64";
@@ -59,7 +59,7 @@ export async function update(): Promise<number> {
     rmSync(staged, { force: true });
   }
   writeRecord("update", { checkedAt: Date.now(), latest });
-  console.log(`Updated weblab ${manifest.version} to ${latest}. MCP clients pick it up when they next start it.`);
+  console.log(`Updated weblab ${VERSION} to ${latest}. MCP clients pick it up when they next start it.`);
   return 0;
 }
 
@@ -79,6 +79,6 @@ export function updateNote(): string | null {
       () => {},
     );
   }
-  if (checked === null || !newer(checked.latest, manifest.version)) return null;
-  return `note: weblab ${checked.latest} is out (this is ${manifest.version}). Update with: weblab update`;
+  if (checked === null || !newer(checked.latest, VERSION)) return null;
+  return `note: weblab ${checked.latest} is out (this is ${VERSION}). Update with: weblab update`;
 }
