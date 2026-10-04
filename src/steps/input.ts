@@ -118,12 +118,13 @@ export const inputSteps: Record<string, Action> = {
     const { key, hold } = arg<{ key: string; hold?: number }>(args, "key", "press");
     if (key === undefined) bad("press", `a key like "Enter", or { key, hold, ...target }`);
     if (hold !== undefined && (typeof hold !== "number" || hold < 0)) bad("press", "hold as a number of milliseconds");
+    await front(ctx);
+    // Only finding the element can time out. A locator's press shares one
+    // timeout with the key, and running out mid-hold leaves it down.
+    if (isObject(args) && hasTarget(args)) await locate(ctx, args, "press").focus();
     // Held, the key goes down, stays down for that long, and comes up:
     // one keydown, without the repeats a held key sends by hand.
-    const options = { delay: hold };
-    await front(ctx);
-    if (isObject(args) && hasTarget(args)) await locate(ctx, args, "press").press(String(key), options);
-    else await ctx.page.keyboard.press(String(key), options);
+    await ctx.page.keyboard.press(String(key), { delay: hold });
   }),
 
   type: step(`type key by key into what has focus, or into an element: "text" or { value, delay, ...target }`, async (ctx, args) => {
