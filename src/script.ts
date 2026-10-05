@@ -113,7 +113,9 @@ function expand(steps: unknown[], where: string, base: string, params: Record<st
     }
     const keys = Object.keys(step).filter((key) => !BESIDE_ACTION.includes(key));
     if (keys.length !== 1) {
-      throw new UsageError(`${at}: expected exactly one action, found ${keys.length}${keys.length === 0 ? "" : ` (${keys.join(", ")})`}; beside it a step may have ${BESIDE_ACTION.join(", ")}`);
+      // A key that is no step is most likely an option written beside its action.
+      const inside = keys.some((key) => !STEP_NAMES.includes(key)) ? `, and the action's own options go inside it: { "click": { "selector": "#a", "button": "right" } }` : "";
+      throw new UsageError(`${at}: expected exactly one action, found ${keys.length}${keys.length === 0 ? "" : ` (${keys.join(", ")})`}; beside it a step may have ${BESIDE_ACTION.join(", ")}${inside}`);
     }
     const action = keys[0] as string;
     checkTimeout((step as Step).timeout, at);

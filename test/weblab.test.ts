@@ -284,7 +284,7 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   assert.equal(failed.isError, false);
   assert.equal(failed.failed, true);
   assert.match(failed.text, /ok {4}1 click/);
-  assert.match(failed.text, /FAIL {2}2 expect: the greeting is missing \(expected the text "not there" to be visible\)/);
+  assert.match(failed.text, /FAIL {2}2 expect: the greeting is missing \(expected the text "not there" to be visible, but it isn't on the page\)/);
   assert.doesNotMatch(failed.text, /3 click/);
   assert.equal(failed.images, 1);
   assert.ok(existsSync(join(dir, "shots", "main-FAIL-2-expect.png")));
@@ -300,7 +300,15 @@ test("a failed step says why with a picture, stops the run, and leaves the sessi
   // Steps written wrong say how, and take no picture.
   const typo = await lab.tool("run", { steps: [{ clik: "#inc" }] });
   assert.match(typo.text, /unknown step "clik" \(did you mean "click"\?\)/);
-  assert.match((await lab.tool("run", { steps: [{ click: "#inc", fill: "x" }] })).text, /expected exactly one action, found 2 \(click, fill\)/);
+  assert.match((await lab.tool("run", { steps: [{ click: "#inc", fill: "x" }] })).text, /expected exactly one action, found 2 \(click, fill\); beside it a step may have timeout, message, note, on$/m);
+  // Options written beside the action are shown where they go.
+  assert.match((await lab.tool("run", { steps: [{ click: "#inc", position: { x: 1, y: 1 } }] })).text, /the action's own options go inside it: \{ "click": \{ "selector"/);
+  // A check that fails says whether what it wanted is hidden or not there at all.
+  await lab.tool("run", { steps: [{ js: "document.body.insertAdjacentHTML('beforeend', '<p id=ghost hidden>ghost words</p>')" }] });
+  assert.match((await lab.tool("run", { steps: [{ expect: "ghost words", timeout: 200 }] })).text, /expected the text "ghost words" to be visible, but it is on the page, hidden/);
+  assert.match((await lab.tool("run", { steps: [{ expect: "text=ghost words", timeout: 200 }] })).text, /\(a string is text to find, not a selector: for an element, use \{ "visible": "text=ghost words" \}\)/);
+  assert.match((await lab.tool("run", { steps: [{ expect: { visible: "#ghost" }, timeout: 200 }] })).text, /expected #ghost to be visible, but it is hidden/);
+  assert.match((await lab.tool("run", { steps: [{ expect: { visible: "#nobody" }, timeout: 200 }] })).text, /expected #nobody to be visible, but nothing matches it/);
   // A step that never ran, being written wrong, makes the reply an error, unlike one that ran and failed.
   const misspelt = await lab.tool("run", { steps: [{ click: { selector: "#inc", buton: "right" } }] });
   assert.match(misspelt.text, /FAIL {2}1 click: no option "buton" \(did you mean "button"\?\)/);
@@ -493,7 +501,7 @@ test("sessions opened at the same moment share one server, and leaving mid-open 
   assert.match(d.text, /title other/);
   // A failure on another session says which, once.
   const failed = await lab.tool("run", { session: "a", steps: [{ expect: "nowhere", on: "b", timeout: 200 }] });
-  assert.match(failed.text, /FAIL {2}1 expect on b: expected the text "nowhere" to be visible/);
+  assert.match(failed.text, /FAIL {2}1 expect on b: expected the text "nowhere" to be visible, but it isn't on the page/);
   const ended = await lab.tool("end");
   assert.equal((ended.text.match(/stopped the server/g) ?? []).length, 1);
   assert.equal(await answers(origin), false);
@@ -745,6 +753,9 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   const started = await lab.tool("run", { steps: [{ goto: { url: "/", ready: false } }, { ready: true }, { js: mounted }, { goto: { url: "/", ready: false } }, { video: "start" }, { js: mounted }, { video: "start" }] });
   assert.match(started.text, /ok {4}3 js \(\d+ms\)\ntrue\n/);
   assert.match(started.text, /ok {4}6 js \(\d+ms\)\ntrue\nFAIL {2}7 video: a video is being recorded already/);
+  assert.doesNotMatch(started.text, /note {2}the video is still recording/);
+  // Any other step failing during a take says the take goes on.
+  assert.match((await lab.tool("run", { steps: [{ expect: "nowhere", timeout: 200 }] })).text, /note {2}the video is still recording\. For a clean take/);
   await lab.tool("run", { steps: [{ click: "#inc" }, { hover: "#ask" }] });
   // The cursor drawn for the recording isn't in a screenshot: it matches one from a session that has no cursor.
   await lab.tool("new", { ...BASE, name: "plain", out: dir });

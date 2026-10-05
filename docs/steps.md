@@ -177,6 +177,8 @@ A path in a step (`upload`, a `js` or `playwright` file, a shot's `matches`) is 
 
 "Since it loaded" means since the tab last loaded a document: a `goto` or a reload starts afresh, and a route change inside a single-page app doesn't. To check that one action caused one request, use code: see [Recipes](recipes.md#check-that-nothing-errored-and-that-the-app-called-its-api).
 
+When text or an element never shows, the failure says whether it is on the page but hidden, or not there at all.
+
 An `expect` takes `timeout` and `message` inside it too. A `message` inside replaces the failure text; one beside it, as on any step, leads it.
 
 ### Matching
@@ -257,6 +259,7 @@ file  $TMPDIR/weblab/shop-20261003-101600/videos/main.webm
 
 - Starting waits for the app to be ready first, as `goto` does, so a video never opens on a blank page that is still loading. `ready` is `false` to start at once, or `{ selector | text | js, timeout }` for what to wait for.
 - `as` names the file: `{ "video": { "as": "checkout" } }` is `videos/<session>-checkout.webm`. Without it, the first take is `videos/<session>.webm` and later ones `<session>-take2.webm`, and so on.
+- A failed step stops the run, not the take: the reply notes it is still recording. For a clean take, stop it and start a new one once the steps work.
 - Stopping holds the last frame for two seconds, so the outcome can be read, and hands back the file. A take still going when its session ends is written then, and `end` names it.
 - A tab the steps move to with `tab` during a take is recorded too, to a file of its own (`<take>-tab1.webm`). Closing it with `tab` keeps its file, but a tab the page closes by itself takes its recording with it.
 - It works the same in every browser, and in a browser or app the session attached to.

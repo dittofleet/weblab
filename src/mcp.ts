@@ -264,7 +264,7 @@ const STEPS = STEP_NAMES_BY_GROUP.map(([title, names]) => `${title}: ${names.joi
 // agent needs first comes first, and the details are left to docs.
 const RUN = `Run steps on a session, in order, stopping at the first that fails. The session stays open either way.
 
-A step is an object with one action: { "click": "text=Save" }, { "shot": { "as": "home", "fullPage": true } }, { "back": true }. Beside its action a step may have "on" (another session's name), "timeout" (ms), "message" (what to say if it fails), "note" (a comment).
+A step is an object with one action: { "click": "text=Save" }, { "shot": { "as": "home", "fullPage": true } }, { "back": true }. Beside its action a step may have "on" (another session's name), "timeout" (ms), "message" (what to say if it fails), "note" (a comment). Wait for what should change rather than a set time: { "expect": "Saved" }, { "expect": { "hidden": ".spinner" } }.
 
 Where a step takes an element, it takes any of: a Playwright selector ("button.save", "text=Sign in"), a ref a look step printed ("e12"), or an object: { "role": "button", "name": "Save" }, { "label": "Email" }, { "placeholder": ... }, { "text": ... }, { "testId": ... }, { "altText": ... }, { "title": ... }, { "component": "CartItem" } (React), with optional nth, exact, frame, within. In an object step the element's keys sit beside the step's own: { "fill": { "label": "Email", "value": "ada@example.com" } }.
 
