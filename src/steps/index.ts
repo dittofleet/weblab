@@ -58,7 +58,7 @@ const OWN_KEYS: Record<string, { keys: string[]; target?: boolean }> = {
   expect: { keys: EXPECT_KEYS, target: true },
   wait: { keys: ["ms"] },
   look: { keys: ["as", "format", "depth"], target: true },
-  shot: { keys: ["as", "fullPage", "animations", "screen", "matches", "tolerance"], target: true },
+  shot: { keys: ["as", "fullPage", "clip", "animations", "screen", "matches", "tolerance"], target: true },
   video: { keys: ["as", "ready"] },
   mock: { keys: ["url", "json", "body", "abort", "off", "status", "contentType"] },
   dialog: { keys: ["accept", "text"] },

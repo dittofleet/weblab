@@ -96,7 +96,7 @@ One project can run several copies of its app, each at its own address, each wit
 ```text
 session b  at http://localhost:4102 (server started by weblab: node server.mjs)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:4102 (node server.mjs); it stops when the last session on it ends
+started the server at http://localhost:4102 (node server.mjs in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (412ms)
 url   http://localhost:4102/
 title Shop

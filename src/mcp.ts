@@ -14,7 +14,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { DOCS, docContents, docIndex, docSection, docText, docUri } from "./docs.ts";
 import { checkTimeout, fileSteps, inlineSteps } from "./script.ts";
-import { end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
+import { defaultDir, end, endAll, endedLines, firstPath, has, MAIN, names, newJob, open, runStep, session, within, type Ended, type Job, type Session } from "./sessions.ts";
 import { builtinActions, STEP_NAMES_BY_GROUP } from "./steps/index.ts";
 import { mapText } from "./sources.ts";
 import type { SessionOptions, Step, StepResult } from "./types.ts";
@@ -230,7 +230,7 @@ const sessionOptions = z.object({
   address: z.union([z.string(), z.number()]).optional().describe("Where the app answers: a URL (a path on it is where the session goes first), host:port, or a port. Default: the project's dev server (the PORT in its .env, else wherever its dev script says it is listening). Whatever already answers at the address is used as it is."),
   start: z.string().optional().describe("The command that starts the app, run in the project's root (the nearest package.json at or above dir) when nothing answers at the address. It gets the address's port as PORT. Default: the project's dev script. A server weblab starts is shared by every session at its address and stopped when the last of them ends."),
   startTimeout: z.number().optional().describe("How long a server weblab starts gets to answer, in milliseconds (default: 60000)."),
-  dir: z.string().optional().describe("The project directory: where its dev script and .env are, and where relative paths in steps are read from. Default: where weblab was started."),
+  dir: z.string().optional().describe("The project directory: where its dev script and .env are, and where relative paths in steps are read from. Default: the dir the last session opened with, else where weblab was started (where its client started, not where a shell has moved since: working in a worktree, give its path). weblab won't use the folder it was started in when its repository is checked out elsewhere too."),
   path: z.string().optional().describe(`Where to go first: a path or URL. Default: "/", or with attach, wherever the browser already is.`),
   attach: z.union([z.string(), z.number()]).optional().describe("Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. It is left as it was found."),
   tab: z.string().optional().describe("With attach: which tab to drive, by part of its URL or title (default: the first)."),
@@ -283,7 +283,9 @@ Only addresses can conflict. Whatever answers at a session's address is used as 
 
 The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks. It reads a whole page, or one section: { "section": "shot" } is one step's forms and options.
 
-To see a page, run { "look": true } (its accessibility tree, with refs to act on) or { "shot": "name" } (a screenshot). In a React app, { "react": "tree" } shows its components and { "react": { "inspect": ... } } one of them, with its file and line. To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (new's mainProcess). Sessions end when this weblab exits; nothing is written into the project.`;
+When you work in a checkout other than the one your client started in (a worktree), give new its dir: a server is started there, and later sessions default to it.
+
+To see a page, run { "look": true } (its accessibility tree, with refs to act on; { "look": { "role": "dialog" } } reads one part of it, and depth keeps only the top levels) or { "shot": "name" } (a screenshot). In a React app, { "react": "tree" } shows its components and { "react": { "inspect": ... } } one of them, with its file and line. To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (new's mainProcess). Sessions end when this weblab exits; nothing is written into the project.`;
 
 export function createServer(version: string): McpServer {
   const server = new McpServer({ name: "weblab", version }, { instructions: INSTRUCTIONS });
@@ -337,7 +339,7 @@ export function createServer(version: string): McpServer {
         if (steps !== undefined && file !== undefined) return result(["run: give steps or file, not both"], true);
         checkTimeout(timeout, "run");
         checkTimeout(wait, "run: wait");
-        const base = has(on) ? session(on).app.root : process.cwd();
+        const base = has(on) ? session(on).app.root : defaultDir();
         const given: Step[] | null = file !== undefined ? fileSteps(file, base, params) : steps !== undefined ? inlineSteps(steps, base, params) : null;
 
         const deadline = Date.now() + (wait ?? DEFAULT_WAIT_MS);

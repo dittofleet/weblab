@@ -16,7 +16,7 @@ Opens a session: a browser of its own (its own cookies, storage and tabs) pointi
 | `address` | Where the app answers: a URL, `host:port`, or a port (`4000` is `http://localhost:4000`). A path on a URL is where the session goes first, unless `path` says otherwise. See [How an address is resolved](#how-an-address-is-resolved). | The project's dev server |
 | `start` | The command that starts the app when nothing answers at the address. It runs in the project directory with the address's port in `PORT`. | The project's `dev` script |
 | `startTimeout` | How long a server weblab starts gets to answer, in milliseconds. | `60000` |
-| `dir` | The project directory: where its `package.json`, dev script and `.env` are, and where relative paths in steps are read from. | Where weblab was started |
+| `dir` | The project directory: where its `package.json`, dev script and `.env` are, and where relative paths in steps are read from. See [Which project](#which-project). | The `dir` the last session opened with, else where weblab was started |
 | `path` | Where to go first: a path, resolved against the address, or a full URL. | `/`; with `attach`, wherever the browser already is |
 | `attach` | Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. See [attach](#attach). | Launch a browser |
 | `tab` | With `attach`: which tab to drive, by part of its URL or title. | The first tab |
@@ -43,7 +43,7 @@ Some combinations are refused with a message saying why: `tab`, `newTab` and `ma
 ```text
 session main  at http://localhost:5173 (server started by weblab: bun run dev)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:5173 (bun run dev); it stops when the last session on it ends
+started the server at http://localhost:5173 (bun run dev in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (566ms)
 url   http://localhost:5173/
 title Shop
@@ -54,7 +54,7 @@ console since the last reply:
 
 - The first line names the session and its address. `(server started by weblab: ...)` is there when the server is one weblab started, in this process or another. An attached session says `attached to 9222`, then `, main process at 9229` when it was given `mainProcess`, and `, at <address>` when it was given one.
 - `files` is the directory the session writes to.
-- Lines about the server follow, when there is something to say: that weblab started it, is waiting for another weblab that is starting it, or is keeping track of one that went into the background.
+- Lines about the server follow, when there is something to say: that weblab started it (with the command, and the folder it ran in), is waiting for another weblab that is starting it, or is keeping track of one that went into the background.
 - The first `goto` is reported as step 1, as a `run` reports steps.
 - Then where the page is (`url`, `title`), its tabs if it has more than one, and what the console logged.
 
@@ -71,6 +71,12 @@ With no `address`, the session points at the project's own dev server:
 3. Otherwise, weblab starts the `dev` script and waits for it to answer at the `PORT` in `.env`, or at a `localhost` address it prints as it starts. An address it prints that something else already serves (an API the app calls) is not taken for the app.
 
 The project is the nearest directory at or above `dir` with a `package.json`, looking no higher than the top of its git repository; in a monorepo that is the app's own folder. Its `dev` script runs with the package manager its lockfile names (`bun`, `pnpm`, `yarn` or `npm`), or the first of those installed.
+
+### Which project
+
+A session given `dir` is in that project, and once it has opened, every session opened after it without one is too. Until a `dir` is given, the project is the folder weblab was started in: where its client (the agent's app) started, which isn't always where the agent works. An agent that moved into a worktree after starting still has weblab in the checkout it started in.
+
+So weblab won't take that folder as the project when its repository is checked out anywhere else as well (it has other git worktrees): the wrong checkout's server serves the wrong code, and its dev script may rewrite that checkout's `.env` or take its ports. The session is refused, naming the checkouts: `new: no dir was given, so the project is the folder weblab was started in, ~/code/shop. Its repository is checked out elsewhere too (~/code/shop-worktrees/fix-cart), so weblab won't guess that this is the one. Give dir: ...`. Giving `dir` once, even the same folder, settles it. A session that only attaches to a running browser, or points at an `address` where something already answers, isn't asked.
 
 ### When a server is started, shared and stopped
 

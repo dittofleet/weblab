@@ -61,6 +61,8 @@ export type Settings = {
 export type App = {
   /** Where its package.json sits, else the git toplevel, else the directory given. */
   root: string;
+  /** The top of the git checkout it is in, if it is in one. */
+  toplevel: string | null;
   /** `<repo>`, plus the worktree and the subdirectory when they differ: names artifact dirs. */
   label: string;
   /** A stable key from the root, naming this project's saved sign-ins and kept profiles. */
