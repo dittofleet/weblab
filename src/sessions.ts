@@ -815,6 +815,8 @@ export async function runStep(job: Job, given: Step): Promise<{ ok: boolean; rec
     // A step the app went away under says that, rather than what Playwright made of it.
     const message = where?.gone() ? `${on}${GONE}` : `${on}${within}${entry.error ?? stepError(error)}`;
     entry.error = message;
+    // The run stops here and the take doesn't. A failed video step says what to do already.
+    if (where?.ctx.video && action !== "video") (entry.notes ??= []).push(`the video is still recording. For a clean take, stop it with { "video": "stop" } and start again`);
     // A step written wrong says nothing about the page: no picture, and the session's record is clean.
     if (error instanceof UsageError) {
       entry.refused = true;
@@ -828,7 +830,8 @@ export async function runStep(job: Job, given: Step): Promise<{ ok: boolean; rec
       const screenshot = where.ctx.artifacts.path("shots", `FAIL-${which}`, "png");
       // The page may be gone; the failure stands without its picture.
       const { page } = where.ctx;
-      const shot = await withoutCursor(page, where.ctx.video, () => page.screenshot({ path: screenshot, timeout: 5000 })).then(() => screenshot, () => undefined);
+      // At CSS pixels, a quarter of a 2x page's: enough to see what went wrong, at a fraction of the reply.
+      const shot = await withoutCursor(page, where.ctx.video, () => page.screenshot({ path: screenshot, scale: "css", timeout: 5000 })).then(() => screenshot, () => undefined);
       if (shot !== undefined) entry.screenshot = shot;
     }
     return { ok: false, record: entry };

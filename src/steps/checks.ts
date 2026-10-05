@@ -55,9 +55,13 @@ function nearMisses(seen: string[], pattern: unknown): string[] {
 const QUICK = { timeout: 250 };
 
 // Text on the page means text in any of its frames, as `look` shows it.
-async function visibleText(page: Page, text: string, exact?: boolean): Promise<number> {
+// `all` counts hidden matches too.
+async function textCount(page: Page, text: string, exact?: boolean, all = false): Promise<number> {
   const counts = await Promise.all(
-    page.frames().map((frame) => frame.getByText(text, { exact }).filter({ visible: true }).count().catch(() => 0)),
+    page.frames().map((frame) => {
+      const found = frame.getByText(text, { exact });
+      return (all ? found : found.filter({ visible: true })).count().catch(() => 0);
+    }),
   );
   return counts.reduce((sum, count) => sum + count, 0);
 }
@@ -69,7 +73,8 @@ async function visibleText(page: Page, text: string, exact?: boolean): Promise<n
  */
 type ExpectationBuilder = (ctx: ActionContext, args: any, timeout?: number) => {
   holds(): Promise<boolean>;
-  wanted(): string;
+  /** Said once the check has failed for good, so it may look at the page to say why. */
+  wanted(): string | Promise<string>;
   once?: boolean;
 };
 
@@ -81,7 +86,8 @@ type Expectation = [key: string, build: ExpectationBuilder, shape?: string];
 
 const visibleCheck: ExpectationBuilder = (ctx, { visible }) => ({
   holds: () => locate(ctx, visible, "expect").isVisible(),
-  wanted: () => `${show(visible)} to be visible`,
+  // Whether it is there at all is the first thing to know about one that isn't showing.
+  wanted: async () => `${show(visible)} to be visible, but ${(await locate(ctx, visible, "expect").count().catch(() => 0)) === 0 ? "nothing matches it" : "it is hidden"}`,
 });
 
 const EXPECTATIONS: Expectation[] = [
@@ -145,7 +151,7 @@ const EXPECTATIONS: Expectation[] = [
   [
     "noText",
     ({ page }, { noText }) => ({
-      holds: async () => (await visibleText(page, noText)) === 0,
+      holds: async () => (await textCount(page, noText)) === 0,
       wanted: () => `no visible text "${noText}", but it's there`,
     }),
   ],
@@ -282,8 +288,13 @@ function truthyCheck(code: string, where: string, evaluate: () => Promise<{ valu
 const textForm: ExpectationBuilder = (ctx, { text, exact, ...rest }) => {
   if (!hasTarget(rest)) {
     return {
-      holds: async () => (await visibleText(ctx.page, text, exact)) > 0,
-      wanted: () => `the text "${text}" to be visible`,
+      holds: async () => (await textCount(ctx.page, text, exact)) > 0,
+      wanted: async () => {
+        const found = (await textCount(ctx.page, text, exact, true)) === 0 ? "it isn't on the page" : "it is on the page, hidden";
+        // `text=...` and the like read as selectors, but a string here is only ever text.
+        const selector = /^(css|text|xpath|id|role|data-testid)=/.test(text) ? ` (a string is text to find, not a selector: for an element, use { "visible": ${JSON.stringify(text)} })` : "";
+        return `the text "${text}" to be visible, but ${found}${selector}`;
+      },
     };
   }
   const target = exact === undefined ? rest : { ...rest, exact };
@@ -344,6 +355,6 @@ export const checkSteps: Record<string, Action> = {
     }
     const { holds, wanted, once } = build(ctx, check, timeout ?? ctx.timeout);
     const ok = once ? await holds() : await poll(holds, timeout ?? ctx.timeout);
-    if (!ok) ctx.fail(message ?? `expected ${wanted()}`);
+    if (!ok) ctx.fail(message ?? `expected ${await wanted()}`);
   },
 };

@@ -159,7 +159,7 @@ Each screenshot comes back as an image, placed right after the lines of the step
 
 ```text
 ok    1 click (35ms)
-FAIL  2 expect: the greeting is missing (expected the text "not there" to be visible)
+FAIL  2 expect: the greeting is missing (expected the text "not there" to be visible, but it isn't on the page)
 shot  $TMPDIR/weblab/fixture-20261003-101600/shots/main-FAIL-2-expect.png
 ```
 

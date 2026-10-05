@@ -275,7 +275,7 @@ A failure in code says where it came from:
 
 | What happened | The reply says |
 | --- | --- |
-| A step the code ran failed, and the code let it through | `FAIL  1 playwright: its step 2 (expect): the greeting is missing (expected the text "Hello" to be visible)`: which of its steps, that step's `message`, and what happened. The screenshot is of the page at that moment, `shots/main-FAIL-1.2-expect.png`. |
+| A step the code ran failed, and the code let it through | `FAIL  1 playwright: its step 2 (expect): the greeting is missing (expected the text "Hello" to be visible, but it isn't on the page)`: which of its steps, that step's `message`, and what happened. The screenshot is of the page at that moment, `shots/main-FAIL-1.2-expect.png`. |
 | The code threw its own error | `FAIL  1 playwright: thrown by the code (check.ts:4)`: the message, and the file and line it came from. |
 | A step the code ran is written wrong | `FAIL  1 playwright: its step 2 (clik): unknown step {"clik":"#inc"} (did you mean "click"?); every step is listed in the run tool's description` |
 
