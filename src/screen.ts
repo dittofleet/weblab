@@ -20,7 +20,7 @@ export const SCREEN_AREAS = ["page", "window", "display"] as const;
 /** How much of the screen: the page's part of the window, the whole window, or the display it is on. */
 export type ScreenArea = (typeof SCREEN_AREAS)[number];
 
-type Rect = { x: number; y: number; width: number; height: number };
+export type Rect = { x: number; y: number; width: number; height: number };
 
 // How long nobody has touched the keyboard or pointer, in seconds; 0 when it can't be told.
 function idleSeconds(): number {

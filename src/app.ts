@@ -1,7 +1,7 @@
 // The project a session is opened from: its root, a label for artifact
 // dirs, where its dev server answers, and how to start it.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { UsageError } from "./errors.ts";
 import { fileName } from "./state.ts";
@@ -23,8 +23,8 @@ function nearestPackageDir(from: string, toplevel: string | null): string | null
 }
 
 /** Finds the project a directory is in. `settings` is how its session is driven. */
-export function resolveApp(dir: string | undefined, settings: Settings = {}): App {
-  const start = resolve(dir ?? process.cwd());
+export function resolveApp(dir: string, settings: Settings = {}): App {
+  const start = resolve(dir);
   if (!existsSync(start)) throw new UsageError(`dir: no such directory: ${start}`);
   // One git call for both: the checkout's top, and its common git dir,
   // which sits in the main checkout and so names the repo.
@@ -38,10 +38,24 @@ export function resolveApp(dir: string | undefined, settings: Settings = {}): Ap
 
   return {
     root,
+    toplevel,
     label,
     key: createHash("sha1").update(root).digest("hex").slice(0, 12),
     settings,
   };
+}
+
+/** The repository's other checkouts (its other worktrees): where else the same app could be run from. */
+export function otherCheckouts(app: App): string[] {
+  const listed = app.toplevel === null ? null : git(app.root, "worktree", "list", "--porcelain");
+  if (listed === null) return [];
+  return listed
+    .split("\n\n")
+    .map((entry) => entry.split("\n"))
+    .filter((lines) => !lines.includes("bare"))
+    .map((lines) => lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length))
+    // Compared as real paths: a worktree may be recorded by a symlinked path.
+    .filter((path): path is string => path !== undefined && existsSync(path) && realpathSync(path) !== realpathSync(app.toplevel as string));
 }
 
 // Env files may hold secrets, so only the one port line is ever

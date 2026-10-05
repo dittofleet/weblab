@@ -46,7 +46,7 @@ In a client's JSON config, the server entry is `{ "command": "weblab" }`. Sessio
 ```text
 session main  at http://localhost:5173 (server started by weblab: pnpm run dev)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:5173 (pnpm run dev); it stops when the last session on it ends
+started the server at http://localhost:5173 (pnpm run dev in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (1840ms)
 url   http://localhost:5173/settings
 title Settings

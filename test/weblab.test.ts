@@ -3,8 +3,8 @@
 // Every weblab here shares one state dir of the tests' own, so nothing
 // touches servers weblab is running for real projects.
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,8 +20,11 @@ const app = join(import.meta.dirname, "fixture-app");
 const kit = join(import.meta.dirname, "fixture-kit");
 const scratch = mkdtempSync(join(tmpdir(), "weblab-test-"));
 const VERSION = "2026-07-28";
-// What every session here is opened with.
-const BASE = { viewport: "800x600@1", ignore: ["favicon"] };
+// What every session here is opened with. The fixture's folder is named,
+// as this repository may have other worktrees, where weblab won't start
+// a server in the folder it was started in without being told.
+const LOOKS = { viewport: "800x600@1", ignore: ["favicon"] };
+const BASE = { ...LOOKS, dir: app };
 
 // These start servers and Chrome, which a busy machine makes slow.
 function test(name: string, body: () => void | Promise<void>): void;
@@ -51,8 +54,8 @@ type Weblab = {
 const all: Weblab[] = [];
 let count = 0;
 
-function weblab(env: Record<string, string> = {}): Weblab {
-  const child = spawn(bin as string, prefix, { cwd: app, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
+  const child = spawn(bin as string, prefix, { cwd, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const waiting = new Map<number, (message: any) => void>();
   createInterface({ input: child.stdout! }).on("line", (line) => {
     // Nothing but the protocol is ever on stdout.
@@ -190,6 +193,7 @@ test("new starts the project's server, run drives the page and shows it, end sto
   const opened = await lab.tool("new", { ...BASE, out: dir });
   assert.equal(opened.failed, false, opened.text);
   assert.match(opened.text, /^session main {2}at http:\/\/localhost:\d+ \(server started by weblab: bun run dev\)/);
+  assert.match(opened.text, new RegExp(`started the server at ${originIn(opened.text)} \\(bun run dev in ${app}\\)`));
   assert.match(opened.text, /ok {4}1 goto/);
   assert.match(opened.text, /title fixture/);
   assert.match(opened.text, /console since the last reply:\n {2}\[console\.log\] fixture mounted/);
@@ -411,6 +415,45 @@ test("a server someone else started is used as it is, and left running", async (
   }
 });
 
+test("weblab won't start a server in the folder it was started in when the repository is checked out elsewhere too", async () => {
+  // A repository of its own, with the fixture's server as its dev script.
+  const repo = join(scratch, "checkouts", "shop");
+  const other = join(scratch, "checkouts", "shop-other");
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+  mkdirSync(repo, { recursive: true });
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "shop", scripts: { dev: "node server.mjs" } }));
+  writeFileSync(join(repo, "server.mjs"), readFileSync(join(app, "server.mjs")));
+  git("init", "-q");
+  git("add", ".");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "shop");
+
+  // With the one checkout, the folder weblab was started in is the project.
+  const alone = weblab({}, repo);
+  const first = await alone.tool("new", LOOKS);
+  assert.equal(first.failed, false, first.text);
+  await alone.close();
+
+  git("worktree", "add", "-q", other);
+  const lab = weblab({}, repo);
+  const refused = await lab.tool("new", LOOKS);
+  assert.equal(refused.isError, true);
+  assert.match(refused.text, new RegExp(`no dir was given, so the project is the folder weblab was started in, .*shop\. Its repository is checked out elsewhere too \\(.*shop-other\\), so weblab won't guess that this is the one`));
+  // Given once, the dir is the default after.
+  const there = await lab.tool("new", { ...LOOKS, dir: other });
+  assert.equal(there.failed, false, there.text);
+  assert.match(there.text, /started the server at .* \(\S+ run dev in .*shop-other\)/);
+  // What already answers at an address given is used, whichever checkout weblab is in.
+  const visitor = weblab({}, repo);
+  const joined = await visitor.tool("new", { ...LOOKS, address: originIn(there.text) });
+  assert.equal(joined.failed, false, joined.text);
+  await visitor.close();
+  await lab.tool("end");
+  const again = await lab.tool("new", LOOKS);
+  assert.equal(again.failed, false, again.text);
+  assert.match(again.text, /run dev in .*shop-other\)/);
+  await lab.close();
+});
+
 test("two weblabs share a server, the last to end stops it, and one that is killed is cleaned up after", async () => {
   const [one, two] = [weblab(), weblab()];
   const first = await one.tool("new", { ...BASE });
@@ -521,6 +564,13 @@ test("params fill steps and files, code hands back values, and a shot is held to
   assert.match(changed.text, /the shot differs from .*main-now\.png in \d+ of 480000 pixels/);
   assert.ok(existsSync(join(dir, "shots", "main-again.diff.png")));
   assert.equal((await lab.tool("run", { steps: [{ shot: { as: "lenient", matches: before, tolerance: 0.5 } }] })).failed, false);
+
+  // A part of the page: clip, at the page's own scale.
+  assert.equal((await lab.tool("run", { steps: [{ shot: { as: "part", clip: { x: 10, y: 20, width: 120, height: 80 } } }] })).failed, false);
+  const png = readFileSync(join(dir, "shots", "main-part.png"));
+  assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [120, 80]);
+  assert.match((await lab.tool("run", { steps: [{ shot: { as: "part", clip: { x: 0, y: 0, width: 0, height: 10 } } }] })).text, /shot: expected clip to be \{ x, y, width, height \}/);
+  assert.match((await lab.tool("run", { steps: [{ shot: { as: "part", selector: "#inc", clip: { x: 0, y: 0, width: 10, height: 10 } } }] })).text, /a target or clip, not both/);
   await lab.close();
 });
 

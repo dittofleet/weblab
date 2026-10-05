@@ -10,7 +10,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { type CDPSession, type Page } from "playwright-core";
-import { originOf, resolveApp } from "./app.ts";
+import { originOf, otherCheckouts, resolveApp } from "./app.ts";
 import { browserProcess, createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
 import { withoutCursor } from "./cursor.ts";
 import { joinMainProcess, type MainProcess } from "./electron.ts";
@@ -21,7 +21,7 @@ import { sourceMapper } from "./sources.ts";
 import { record, type Recorder } from "./recorder.ts";
 import { actionOf, checkTimeout, stepBase, stepOrigin } from "./script.ts";
 import { keepDisplayAwake, TRACK_PAGE_ON_SCREEN } from "./screen.ts";
-import { ensureServer, fateText, type Server } from "./server.ts";
+import { ensureServer, fateText, probe, type Server } from "./server.ts";
 import { artifactsDir, holdProfile, signInPath, slug } from "./state.ts";
 import { builtinActions, checkOptions } from "./steps/index.ts";
 import { SESSION_KEYS } from "./steps/sessions.ts";
@@ -138,6 +138,15 @@ function pick(on: string): Driver {
 
 export const session = (name: string): Session => pick(name);
 
+// The project a session opened without a dir is in: the last one a
+// session was given, else the folder weblab was started in. That folder
+// is the client's, which may not be where the agent works now (a
+// worktree it moved to), so it is only taken on trust until a dir is given.
+let givenDir: string | undefined;
+
+/** Where a session opened without a dir looks for its project, and where a run on no session reads files from. */
+export const defaultDir = (): string => givenDir ?? process.cwd();
+
 // The directory sessions write to when they aren't given one: made
 // when the first session opens, and named after its project.
 let sharedDir: string | null = null;
@@ -250,6 +259,18 @@ function checked(options: SessionOptions): SessionOptions {
   return options;
 }
 
+// The folder weblab happened to be started in, when the same repository
+// is checked out elsewhere too, may well be the wrong checkout: its
+// server serves the wrong code, and its dev script may change things
+// there. Asked for rather than guessed.
+function checkUnchosen(app: App): void {
+  const others = otherCheckouts(app);
+  if (others.length === 0) return;
+  throw new UsageError(
+    `new: no dir was given, so the project is the folder weblab was started in, ${app.root}. Its repository is checked out elsewhere too (${others.join(", ")}), so weblab won't guess that this is the one. Give dir: the checkout you are working in (${app.root} for this one). Later sessions default to the dir given.`,
+  );
+}
+
 /** Where a session goes first: the path it was given, else the app's front page. One that joined a browser stays where it is. */
 export const firstPath = (opened: Session, path: string | undefined): string | undefined => path ?? opened.firstPath ?? (opened.attached ? undefined : "/");
 
@@ -279,7 +300,10 @@ async function opening_(given: SessionOptions, parent?: Driver): Promise<Session
   try {
     // A browser weblab joins is as it is: it takes nothing from the parent but where files go.
     const base = parent === undefined ? {} : given.attach !== undefined ? { dir: parent.app.root, out: parent.dir } : inherited(parent);
-    return await openNamed(name, { ...base, ...given, context: given.attach !== undefined ? undefined : { ...base.context, ...given.context }, name });
+    const session = await openNamed(name, { ...base, ...given, context: given.attach !== undefined ? undefined : { ...base.context, ...given.context }, name });
+    // A dir the client gave, once a session has opened in it, is where its later ones are.
+    if (parent === undefined && given.dir !== undefined) givenDir = resolve(given.dir);
+    return session;
   } finally {
     opening.delete(name);
   }
@@ -305,7 +329,13 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     ...(options.persist ? { persist: true } : {}),
     ...(options.init === undefined ? {} : { init: [options.init].flat() }),
   };
-  const app = resolveApp(options.dir, settings);
+  const app = resolveApp(options.dir ?? defaultDir(), settings);
+  // Where it answers. A browser that is joined is already somewhere,
+  // so a server is only this session's business when it names one.
+  const address = options.address === undefined ? null : originOf(options.address);
+  const served = settings.attach === undefined || address !== null || options.start !== undefined;
+  // What already answers at an address given is used as it is, whichever checkout this is.
+  if (served && options.dir === undefined && givenDir === undefined && !(address !== null && (await probe(address)))) checkUnchosen(app);
   const dir = options.out !== undefined ? artifactsDir(app.label, options.out) : (sharedDir ??= artifactsDir(app.label, undefined));
 
   const times = (opened.get(name) ?? 0) + 1;
@@ -330,15 +360,12 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     for (const one of undo.reverse()) await Promise.resolve(one()).catch(() => {});
   };
   try {
-    // Where it answers. A browser that is joined is already somewhere,
-    // so a server is only this session's business when it names one.
-    const address = options.address === undefined ? null : originOf(options.address);
     let server: Server | null = null;
     let left: string | undefined;
-    if (settings.attach === undefined || address !== null || options.start !== undefined) {
+    if (served) {
       server = await ensureServer(app, { address: address ?? undefined, command: options.start, timeoutMs: options.startTimeout, logDir: dir, log: say });
       const using = server;
-      if (using.started) say(`started the server at ${using.origin} (${using.command}); it stops when the last session on it ends`);
+      if (using.started) say(`started the server at ${using.origin} (${using.command} in ${app.root}); it stops when the last session on it ends`);
       // Let go of when the session ends; stopped if nothing else is using it.
       undo.push(async () => {
         left = fateText(using.origin, await using.stop()) ?? undefined;

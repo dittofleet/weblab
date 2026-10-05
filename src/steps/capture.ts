@@ -5,7 +5,7 @@ import type { Locator } from "playwright-core";
 export const LOOK_FORMATS = ["refs", "plain", "text", "html"] as const;
 export type LookFormat = (typeof LOOK_FORMATS)[number];
 import { StepFailure, UsageError } from "../errors.ts";
-import { captureScreen, SCREEN_AREAS, type ScreenArea } from "../screen.ts";
+import { captureScreen, SCREEN_AREAS, type Rect, type ScreenArea } from "../screen.ts";
 import type { Action, ActionContext } from "../types.ts";
 import { arg, bad, isObject } from "./args.ts";
 import { readyArg, waitReady } from "./navigation.ts";
@@ -111,6 +111,13 @@ async function compare(ctx: ActionContext, shot: string, { file: before, png }: 
   throw new StepFailure(`the shot differs from ${before} in ${found.different} of ${found.total} pixels (${share}%); what differs is in red in ${diff}`);
 }
 
+// A part of the page to capture: from the viewport's top left, or the page's with fullPage.
+const isClip = (clip: unknown): clip is Rect =>
+  isObject(clip) &&
+  [clip.x, clip.y, clip.width, clip.height].every(Number.isFinite) &&
+  (clip.width as number) > 0 &&
+  (clip.height as number) > 0;
+
 const EXTENSIONS: Record<LookFormat, string> = { refs: "yml", plain: "yml", text: "txt", html: "html" };
 
 export const captureSteps: Record<string, Action> = {
@@ -130,13 +137,14 @@ export const captureSteps: Record<string, Action> = {
   }, { prints: true }),
 
   shot: async (ctx, args) => {
-    const { as, fullPage, animations, screen, matches, tolerance } = arg<{ as?: string; fullPage?: boolean; animations?: boolean; screen?: boolean | ScreenArea; matches?: string; tolerance?: number }>(args, "as", "shot");
+    const { as, fullPage, animations, screen, matches, tolerance, clip } = arg<{ as?: string; fullPage?: boolean; animations?: boolean; screen?: boolean | ScreenArea; matches?: string; tolerance?: number; clip?: Rect }>(args, "as", "shot");
     if (matches !== undefined && typeof matches !== "string") bad("shot", "matches to be the path of a screenshot taken before");
     if (tolerance !== undefined && !(typeof tolerance === "number" && tolerance >= 0 && tolerance <= 1)) bad("shot", "tolerance to be the share of pixels that may differ, from 0 to 1");
     if (as === undefined) {
       // `name` is an element's accessible name, beside `role`; what the file is called is `as`.
       bad("shot", `what to call it: "home", or { as, fullPage, animations, screen, ...target }`);
     }
+    if (clip !== undefined && !isClip(clip)) bad("shot", "clip to be { x, y, width, height } in CSS pixels, with a width and height above 0");
     const path = ctx.artifacts.path("shots", String(as), "png");
     // Read before the new shot is written, which may be to the very same file.
     const before = matches === undefined ? undefined : { file: await ctx.resolveFile(matches), png: "" };
@@ -147,16 +155,19 @@ export const captureSteps: Record<string, Action> = {
       const area = screen === true ? "page" : screen;
       if (!SCREEN_AREAS.includes(area)) bad("shot", `screen to be "page" (or true), "window" or "display"`);
       if (fullPage === true) bad("shot", "screen or fullPage, not both: the screen shows only what's in the window");
+      if (clip !== undefined) bad("shot", "screen or clip, not both");
       await withoutCursor(ctx.page, ctx.video, () => captureScreen(ctx, path, area, hasTarget(args) ? locate(ctx, args, "shot") : undefined));
     } else {
       // Animations are finished (or, endless ones, reset) for the capture,
       // so a shot never catches a page mid-fade, unless asked to.
       const options = { path, animations: animations === true ? ("allow" as const) : ("disabled" as const) };
       // A bare string is the name, so an element is only named in the object form.
-      if (isObject(args) && hasTarget(args)) await withoutCursor(ctx.page, ctx.video, () => locate(ctx, args, "shot").screenshot(options));
-      else {
+      if (isObject(args) && hasTarget(args)) {
+        if (clip !== undefined) bad("shot", "a target or clip, not both: a target is captured whole");
+        await withoutCursor(ctx.page, ctx.video, () => locate(ctx, args, "shot").screenshot(options));
+      } else {
         if (fullPage === true) await loadLazyImages(ctx);
-        await withoutCursor(ctx.page, ctx.video, () => ctx.page.screenshot({ ...options, fullPage: fullPage === true }));
+        await withoutCursor(ctx.page, ctx.video, () => ctx.page.screenshot({ ...options, fullPage: fullPage === true, clip }));
       }
     }
     ctx.artifacts.add(path);
