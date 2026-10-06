@@ -53,10 +53,12 @@ if (flag === "--sweep") {
     import("./sessions.ts"),
   ]);
 
-  // Whatever a weblab that was killed left running, if its watcher didn't get to it.
-  await sweep();
-  // And whatever this one may leave, if it is killed.
+  // Whatever this one may leave, if it is killed.
   watchOver();
+  // And whatever a weblab that was killed left running, if its watcher
+  // didn't get to it: swept while this one serves, as a browser that won't
+  // stop may take a while, and the client is waiting.
+  void sweep();
 
   // Sessions end with the process: browsers closed, videos written, servers let go of.
   onTeardown(shutdown);

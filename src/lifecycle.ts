@@ -24,6 +24,7 @@ export function teardown(): Promise<void> {
         // Keep going: the rest still has to be released.
       }
     }
+    await dismissWatcher();
   })();
   return running;
 }
@@ -37,9 +38,10 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]
 // A process killed outright (SIGKILL, a crash, the OOM killer) runs none
 // of the above. So a watcher is started beside every weblab that serves:
 // a shell holding a pipe from this process, which closes however this one
-// ends. Then it runs weblab's sweep (reaper.ts), which stops whatever
-// this one left. It is in a group of its own, so a signal to this one's
-// group doesn't reach it, and it is only a shell until it has something to do.
+// ends. A teardown that ran to the end tells it so, and it just goes;
+// otherwise it runs weblab's sweep (reaper.ts), which stops whatever this
+// one left. It is in a group of its own, so a signal to this one's group
+// doesn't reach it, and it is only a shell until it has something to do.
 let watcher: ChildProcess | null = null;
 
 export function watchOver(): void {
@@ -47,13 +49,21 @@ export function watchOver(): void {
   // Compiled, weblab is its own executable; from source, bun runs main.ts.
   const self = Bun.main.startsWith("/$bunfs/") ? [] : [Bun.main];
   // `read` blocks until a line or the end of the pipe: the whole wait is the shell's own.
-  watcher = spawn("/bin/sh", ["-c", 'while read -r _; do :; done; exec "$0" "$@"', process.execPath, ...self, "--sweep"], {
+  watcher = spawn("/bin/sh", ["-c", 'read -r line; [ "$line" = done ] || exec "$0" "$@"', process.execPath, ...self, "--sweep"], {
     detached: true,
     stdio: ["pipe", "ignore", "ignore"],
     cwd: "/",
   });
   watcher.on("error", () => {});
+  watcher.stdin?.on("error", () => {});
   // It doesn't keep this one running.
   watcher.unref();
   (watcher.stdin as unknown as { unref?(): void } | null)?.unref?.();
 }
+
+// Written out before the process exits: a write left in the pipe would be lost.
+const dismissWatcher = () =>
+  new Promise<void>((done) => {
+    if (watcher?.stdin == null || watcher.stdin.destroyed) return done();
+    watcher.stdin.end("done\n", done);
+  });

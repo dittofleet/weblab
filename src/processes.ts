@@ -29,13 +29,16 @@ const STARTED = /\w{3} \w{3} [ \d]\d \d\d:\d\d:\d\d \d{4}/;
 
 // A process that has exited but not been collected by its parent yet (a
 // zombie) is gone for every purpose here, though it still answers kill(0).
-const started = (stat: string, time: string) => (stat.startsWith("Z") ? null : time);
+const zombie = (stat: string) => stat.startsWith("Z");
 
 /** When the process started, as `ps` prints it, or null if it has gone (or is a zombie). */
 export const startTime = (pid: number): string | null => {
   const match = /^\s*(\S+)\s+(.*)$/.exec(tryExec("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: PS_ENV }) ?? "");
-  return match === null ? null : started(match[1] as string, match[2] as string);
+  return match === null || zombie(match[1] as string) ? null : (match[2] as string);
 };
+
+/** True while the pid is running, as a zombie isn't. */
+export const running = (pid: number) => startTime(pid) !== null;
 
 /** Whether a process is the one a record names: alive, with the start time recorded for it. */
 export const isProcess = (pid: number, startedAt: string | null) => startedAt !== null && alive(pid) && startTime(pid) === startedAt;
@@ -98,17 +101,18 @@ export const startedAtMs = (pid: number): number | null => {
   return Number.isNaN(ms) ? null : ms;
 };
 
-type Listed = Process & { ppid: number; pgid: number; command: string };
+type Listed = Process & { startedAt: string; ppid: number; pgid: number; command: string };
 
 const LISTED = new RegExp(`^\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\S+)\\s+(${STARTED.source})\\s+(.*)$`);
 
-/** Every process, with its parent, its group, when it started and its command line. */
+/** Every process that is running, with its parent, its group, when it started and its command line. */
 export const processTable = (): Listed[] =>
   (tryExec("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="], { env: PS_ENV }) ?? "").split("\n").flatMap((line) => {
     const match = LISTED.exec(line);
     if (match === null) return [];
-    const [, pid, ppid, pgid, stat, time, command] = match as unknown as string[];
-    return [{ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), startedAt: started(stat as string, time as string), command: command as string }];
+    const [, pid, ppid, pgid, stat, startedAt, command] = match as unknown as string[];
+    if (zombie(stat as string)) return [];
+    return [{ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), startedAt: startedAt as string, command: command as string }];
   });
 
 /** Every pid in a process group. */

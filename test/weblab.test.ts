@@ -553,7 +553,7 @@ test("killed along with its watcher, a weblab's browser and server are stopped b
       const next = weblab();
       await next.rpc("server/discover");
       await gone(browser);
-      assert.equal(await answers(origin), false, "what a killed weblab left is stopped");
+      await eventually(async () => !(await answers(origin)), "what a killed weblab left is stopped");
       assert.equal(await answers(`http://127.0.0.1:${external.port}/json/version`), true, "a browser weblab joined is left running");
       await next.close();
     }

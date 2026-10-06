@@ -17,7 +17,7 @@
 // browser weblab only attached to, or another weblab's (in any checkout)
 // is never touched. A server another live weblab still uses stays up.
 import { setTimeout as sleep } from "node:timers/promises";
-import { groupLeadersStartedBy, isProcess, killGroup, killProcess, membersOf, type Process, processOf } from "./processes.ts";
+import { alive, groupLeadersStartedBy, isProcess, killGroup, killProcess, membersOf, type Process, processOf, processTable } from "./processes.ts";
 import { sweepServers } from "./server.ts";
 import { clearRecord, readRecord, recordNames, writeRecord } from "./state.ts";
 
@@ -40,26 +40,40 @@ const CLOSE_GRACE_MS = 3000;
 // How often a launch is looked in on, so a weblab killed during one leaves a record.
 const LOOK_EVERY_MS = 250;
 
-// What is recorded is what is checked: a process is only ever the one
-// recorded (the same pid, started at the same time), so a pid given out
-// again since (after a reboot, say) is never signalled.
-const leaderRemains = (state: BrowserState) => isProcess(state.pid, state.startedAt);
-const helpersRemaining = (state: BrowserState) => (state.members ?? []).filter((member) => isProcess(member.pid, member.startedAt));
-const remains = (state: BrowserState) => leaderRemains(state) || helpersRemaining(state).length > 0;
+// What is recorded is what is checked, in one reading of the process
+// table: a process is only ever the one recorded (the same pid, started
+// at the same time), so a pid given out again since (after a reboot,
+// say) is never signalled.
+function remaining(state: BrowserState): { leader: boolean; helpers: number[] } {
+  const table = processTable();
+  const is = ({ pid, startedAt }: Process) => startedAt !== null && table.some((listed) => listed.pid === pid && listed.startedAt === startedAt);
+  return { leader: is(state), helpers: (state.members ?? []).filter(is).map((member) => member.pid) };
+}
 
-// Its helpers come and go as pages do: noted again at each turn, for the sweep.
+// Its helpers come and go as pages do: noted again at each turn, for the
+// sweep. The record is only ever written over by its own browser's.
 const remember = (state: BrowserState) => {
-  state.members = membersOf(state.pid);
+  state.members = membersOf(state.pid).filter((member) => member.pid !== state.pid);
   writeRecord(recordName(state.pid), state);
+};
+
+// The record on disk is this browser's: not one written since for a browser that got its pid.
+const recorded = (state: BrowserState) => {
+  const now = readRecord<BrowserState>(recordName(state.pid));
+  return now !== null && now.startedAt === state.startedAt && now.owner?.pid === state.owner.pid;
 };
 
 // Stopped if it hasn't gone by itself, and forgotten: the whole group
 // while the browser leads it, or else whichever helpers outlived it.
 async function stop(state: BrowserState, graceMs: number): Promise<void> {
-  for (let waited = 0; waited < graceMs && remains(state); waited += 100) await sleep(100);
-  if (leaderRemains(state)) await killGroup(state.pid);
-  await Promise.all(helpersRemaining(state).map((member) => killProcess(member.pid)));
-  clearRecord(recordName(state.pid));
+  let left = remaining(state);
+  for (let waited = 0; waited < graceMs && (left.leader || left.helpers.length > 0); waited += 100) {
+    await sleep(100);
+    left = remaining(state);
+  }
+  if (left.leader) await killGroup(state.pid);
+  else await Promise.all(left.helpers.map(killProcess));
+  if (recorded(state)) clearRecord(recordName(state.pid));
 }
 
 // One launch at a time in this process, so each knows which browser is its.
@@ -86,7 +100,11 @@ async function tracked<T>(launch: () => Promise<T>, close: (value: T) => Promise
       if (before.has(pid) || found.has(pid)) continue;
       const state = { ...processOf(pid), owner };
       found.set(pid, state);
-      writeRecord(recordName(pid), state);
+      try {
+        writeRecord(recordName(pid), state);
+      } catch {
+        // Not written down (a full disk): this process still closes it, only a sweep wouldn't find it.
+      }
     }
   };
   const looking = setInterval(look, LOOK_EVERY_MS);
@@ -111,17 +129,18 @@ async function tracked<T>(launch: () => Promise<T>, close: (value: T) => Promise
   };
 }
 
-/** Stops every browser recorded by a weblab that is no longer running. */
+/** Stops every browser recorded by a weblab that is no longer running, all at once. */
 async function sweepBrowsers(): Promise<void> {
-  for (const name of recordNames("browser.")) {
+  await Promise.all(recordNames("browser.").map(async (name) => {
     const state = readRecord<BrowserState>(name);
-    if (state === null) {
+    if (state?.owner === undefined) {
       clearRecord(name);
-      continue;
+      return;
     }
-    if (isProcess(state.owner.pid, state.owner.startedAt)) continue;
+    // An owner whose start couldn't be read when it wrote the record is given the benefit of the doubt.
+    if (state.owner.startedAt === null ? alive(state.owner.pid) : isProcess(state.owner.pid, state.owner.startedAt)) return;
     await stop(state, 0);
-  }
+  }));
 }
 
 /**

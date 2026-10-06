@@ -12,7 +12,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { dependenciesMissing, devCommand, projectOrigin, SERVER_TIMEOUT_MS } from "./app.ts";
 import { SetupError, stripAnsi, tail } from "./errors.ts";
 import { onTeardown } from "./lifecycle.ts";
-import { alive, allListeners, cwdOf, groupMembers, groupOf, isProcess, killGroup, killProcess, listenersOn, membersOf, type Process, processOf, startedAtMs, startTime } from "./processes.ts";
+import { allListeners, cwdOf, groupMembers, groupOf, isProcess, killGroup, killProcess, listenersOn, membersOf, type Process, processOf, running, startedAtMs, startTime } from "./processes.ts";
 import { acquireLock, clearRecord, fileName, readRecord, recordNames, writeRecord } from "./state.ts";
 import type { App } from "./types.ts";
 
@@ -114,7 +114,7 @@ const startedSince = (pid: number, spawnedAt: number | undefined) => {
 // better than signalling another agent's.
 function groupIsOurs(state: ServerState): boolean {
   if (isProcess(state.pgid, state.startedAt)) return true;
-  if (alive(state.pgid) || state.members === undefined) return false;
+  if (running(state.pgid) || state.members === undefined) return false;
   const recorded = state.members;
   const members = groupMembers(state.pgid);
   return members.length > 0 && members.every((pid) => recorded.some((member) => member.pid === pid && isProcess(pid, member.startedAt)));
