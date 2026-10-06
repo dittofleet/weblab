@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { processTable as processes } from "../src/processes.ts";
 import { STEP_NAMES } from "../src/steps/index.ts";
 import { onPath } from "../src/util.ts";
 
@@ -19,6 +20,10 @@ const [bin, ...prefix] = process.env.WEBLAB_BIN ? [resolve(process.env.WEBLAB_BI
 const app = join(import.meta.dirname, "fixture-app");
 const kit = join(import.meta.dirname, "fixture-kit");
 const scratch = mkdtempSync(join(tmpdir(), "weblab-test-"));
+// The weblabs' own temporary directory, where Playwright makes its
+// browsers' profiles: a browser of these tests' is one naming it.
+const temp = join(scratch, "tmp");
+mkdirSync(temp);
 const VERSION = "2026-07-28";
 // What every session here is opened with. The fixture's folder is named,
 // as this repository may have other worktrees, where weblab won't start
@@ -49,13 +54,15 @@ type Weblab = {
   tool(name: string, args?: Record<string, unknown>): Promise<Reply>;
   /** Closes its stdin, as a client going away does, and waits for it to exit. */
   close(): Promise<void>;
+  /** Sends it a signal, and waits for it to exit. */
+  kill(signal: NodeJS.Signals): Promise<void>;
 };
 
 const all: Weblab[] = [];
 let count = 0;
 
 function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
-  const child = spawn(bin as string, prefix, { cwd, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(bin as string, prefix, { cwd, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), TMPDIR: temp, WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const waiting = new Map<number, (message: any) => void>();
   createInterface({ input: child.stdout! }).on("line", (line) => {
     // Nothing but the protocol is ever on stdout.
@@ -98,6 +105,10 @@ function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
       child.stdin!.end();
       await exited;
     },
+    kill(signal) {
+      child.kill(signal);
+      return exited;
+    },
   };
   all.push(made);
   return made;
@@ -126,6 +137,34 @@ const freePort = () =>
       probe.close(() => done(port));
     });
   });
+
+// ---- the processes weblab starts
+
+// Every browser group a test saw, to make sure at the end that none is left.
+const browserGroups = new Set<number>();
+
+/** The browsers a weblab launched, by the process groups they lead (their helpers are in them too). */
+function browsersOf(lab: Weblab): number[] {
+  const groups = processes()
+    .filter((one) => one.ppid === lab.child.pid && one.pid === one.pgid && one.command.includes(temp))
+    .map((one) => one.pgid);
+  for (const group of groups) browserGroups.add(group);
+  return groups;
+}
+
+/** The processes left in a group: a browser and its helpers. */
+const inGroup = (pgid: number) => processes().filter((one) => one.pgid === pgid);
+
+/** The watcher started beside a weblab, to sweep up after it. */
+const watcherOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --sweep$/.test(one.command))?.pid;
+
+/** Waits for a condition, and says what didn't happen if it never does. */
+async function eventually(check: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
+  for (const deadline = Date.now() + ms; Date.now() < deadline; await sleep(100)) if (await check()) return;
+  assert.fail(`never happened: ${what}`);
+}
+
+const gone = (pgid: number) => eventually(() => inGroup(pgid).length === 0, `browser group ${pgid} has exited`);
 
 const out = () => join(scratch, `out-${(count += 1)}`);
 const originIn = (text: string) => /at (http:\/\/localhost:\d+)/.exec(text)?.[1] as string;
@@ -462,7 +501,7 @@ test("weblab won't start a server in the folder it was started in when the repos
   await lab.close();
 });
 
-test("two weblabs share a server, the last to end stops it, and one that is killed is cleaned up after", async () => {
+test("two weblabs share a server, the last to end stops it, and one that is killed has what it started stopped at once", async () => {
   const [one, two] = [weblab(), weblab()];
   const first = await one.tool("new", { ...BASE });
   const origin = originIn(first.text);
@@ -470,20 +509,103 @@ test("two weblabs share a server, the last to end stops it, and one that is kill
   assert.equal(originIn(second.text), origin);
   assert.doesNotMatch(second.text, /started the server/);
   assert.match(second.text, /server started by weblab/);
+  const [mine] = browsersOf(one);
+  const [theirs] = browsersOf(two);
+  assert.ok(mine !== undefined && theirs !== undefined && mine !== theirs, "each weblab launched a browser of its own");
+  assert.ok(inGroup(theirs).length > 1, "a browser runs helpers in its group");
 
   assert.match((await one.tool("end")).text, /left the server at .* running: another session is using it/);
+  // The last session on a browser closes it, helpers and all.
+  await gone(mine);
   assert.equal(await answers(origin), true);
   await one.close();
   assert.equal(await answers(origin), true);
 
-  // Killed outright, it stops nothing; the next weblab to start does.
-  two.child.kill("SIGKILL");
-  await new Promise((done) => two.child.on("exit", done));
-  assert.equal(await answers(origin), true);
-  const next = weblab();
-  await next.rpc("server/discover");
-  assert.equal(await answers(origin), false, "what a killed weblab left is stopped");
-  await next.close();
+  // Killed outright, it can stop nothing itself. Its watcher stops its
+  // browser and the server no live weblab uses, without waiting for another weblab.
+  await two.kill("SIGKILL");
+  await gone(theirs);
+  await eventually(async () => !(await answers(origin)), "the server it alone was using stops");
+});
+
+test("killed along with its watcher, a weblab's browser and server are stopped by the next weblab to start, and only they", async () => {
+  // Someone else's browser, which weblab has only joined: left running.
+  const external = await runningChrome("external", "theirs");
+  try {
+    for (let round = 1; round <= 3; round += 1) {
+      const lab = weblab();
+      const opened = await lab.tool("new", { ...BASE });
+      assert.equal(opened.failed, false, opened.text);
+      const joined = await lab.tool("new", { name: "joined", attach: external.port });
+      assert.equal(joined.failed, false, joined.text);
+      const origin = originIn(opened.text);
+      const [browser] = browsersOf(lab);
+      assert.ok(browser !== undefined);
+      const watcher = watcherOf(lab);
+      assert.ok(watcher !== undefined, "a weblab that starts something has a watcher");
+
+      process.kill(watcher, "SIGKILL");
+      await lab.kill("SIGKILL");
+      await sleep(500);
+      assert.ok(inGroup(browser).length > 0, "with no watcher, nothing has stopped it yet");
+      assert.equal(await answers(origin), true);
+
+      const next = weblab();
+      await next.rpc("server/discover");
+      await gone(browser);
+      await eventually(async () => !(await answers(origin)), "what a killed weblab left is stopped");
+      assert.equal(await answers(`http://127.0.0.1:${external.port}/json/version`), true, "a browser weblab joined is left running");
+      await next.close();
+    }
+  } finally {
+    external.stop();
+  }
+});
+
+test("a session ending, the client going, and a signal each leave no browser running", async () => {
+  const ended = weblab();
+  assert.equal((await ended.tool("new", { ...BASE, name: "a" })).failed, false);
+  assert.equal((await ended.tool("new", { ...BASE, name: "b" })).failed, false);
+  const [shared] = browsersOf(ended);
+  assert.ok(shared !== undefined);
+  assert.equal(browsersOf(ended).length, 1, "sessions launched alike share one browser");
+  await ended.tool("end", { session: "a" });
+  assert.ok(inGroup(shared).length > 0, "a browser another session uses stays");
+  await ended.tool("end", { session: "b" });
+  await gone(shared);
+  await ended.close();
+
+  for (const leave of [(lab: Weblab) => lab.close(), (lab: Weblab) => lab.kill("SIGTERM")]) {
+    const lab = weblab();
+    assert.equal((await lab.tool("new", { ...BASE })).failed, false);
+    const [browser] = browsersOf(lab);
+    assert.ok(browser !== undefined);
+    await leave(lab);
+    // Gone by the time weblab is, not later.
+    assert.deepEqual(inGroup(browser), []);
+  }
+
+  // A helper that outlives its browser (one that hangs) is stopped with it.
+  const hung = weblab();
+  assert.equal((await hung.tool("new", { ...BASE })).failed, false);
+  const [group] = browsersOf(hung);
+  assert.ok(group !== undefined);
+  const helper = inGroup(group).find((one) => one.pid !== group);
+  assert.ok(helper !== undefined);
+  process.kill(helper.pid, "SIGSTOP");
+  process.kill(group, "SIGKILL");
+  await eventually(() => !processes().some((one) => one.pid === group), "the browser has gone");
+  assert.ok(inGroup(group).some((one) => one.pid === helper.pid), "the stopped helper outlives it");
+  await hung.tool("end");
+  await gone(group);
+  await hung.close();
+
+  // A session that fails to open leaves nothing it started.
+  const failing = weblab();
+  const refused = await failing.tool("new", { ...BASE, init: "nonesuch.js" });
+  assert.equal(refused.isError, true);
+  assert.deepEqual(browsersOf(failing), []);
+  await failing.close();
 });
 
 test("sessions opened at the same moment share one server, and leaving mid-open leaves nothing behind", async () => {
@@ -1028,4 +1150,11 @@ test("a server that puts itself in the background is still stopped, and an addre
   } finally {
     theirs.kill();
   }
+});
+
+// Last: whatever any test above started has gone, killed weblabs' too.
+test("no browser any test launched is still running", async () => {
+  await Promise.all(all.map((one) => one.close()));
+  for (const group of browserGroups) await gone(group);
+  await eventually(() => !processes().some((one) => one.command.includes(temp)), "no process runs from the tests' temporary directory");
 });

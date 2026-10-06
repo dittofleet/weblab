@@ -2,12 +2,6 @@
 // weblab is an MCP server over stdio: a client starts it, and it holds
 // that client's sessions until the client goes.
 import { Console } from "node:console";
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { onTeardown, teardown } from "./lifecycle.ts";
-import { createServer } from "./mcp.ts";
-import { sweepServers } from "./server.ts";
-import { shutdown } from "./sessions.ts";
-import { update } from "./update.ts";
 import { VERSION } from "./version.ts";
 
 const HELP = `weblab ${VERSION}: an MCP server for testing and exploring web apps in a real browser.
@@ -30,9 +24,15 @@ Its tools: new (open a session), run (run steps on one), end, list, docs.
 delete process.env.ELECTRON_RUN_AS_NODE;
 
 const [flag] = process.argv.slice(2);
-if (flag === "--version" || flag === "-v") {
+if (flag === "--sweep") {
+  // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended. Only what it needs is loaded.
+  const { sweep } = await import("./reaper.ts");
+  await sweep();
+  process.exit(0);
+} else if (flag === "--version" || flag === "-v") {
   console.log(VERSION);
 } else if (flag === "update") {
+  const { update } = await import("./update.ts");
   process.exitCode = await update().catch((error) => {
     console.error(`weblab: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
@@ -45,8 +45,20 @@ if (flag === "--version" || flag === "-v") {
   // runs prints goes to stderr.
   globalThis.console = new Console({ stdout: process.stderr, stderr: process.stderr }) as unknown as typeof console;
 
-  // Whatever a weblab that was killed left running.
-  await sweepServers().catch(() => {});
+  const [{ serveStdio }, { onTeardown, teardown, watchOver }, { createServer }, { sweep }, { shutdown }] = await Promise.all([
+    import("@modelcontextprotocol/server/stdio"),
+    import("./lifecycle.ts"),
+    import("./mcp.ts"),
+    import("./reaper.ts"),
+    import("./sessions.ts"),
+  ]);
+
+  // Whatever this one may leave, if it is killed.
+  watchOver();
+  // And whatever a weblab that was killed left running, if its watcher
+  // didn't get to it: swept while this one serves, as a browser that won't
+  // stop may take a while, and the client is waiting.
+  void sweep();
 
   // Sessions end with the process: browsers closed, videos written, servers let go of.
   onTeardown(shutdown);

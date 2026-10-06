@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type BrowserType, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { briefError, SetupError, UsageError } from "./errors.ts";
+import { ownBrowser } from "./reaper.ts";
 import { profileDir } from "./state.ts";
 import { openedByWeblab } from "./tabs.ts";
 import type { App, ContextSettings, Viewport } from "./types.ts";
@@ -269,35 +270,38 @@ export function createBrowserManager(app: App, options: { headed: boolean }): Br
         if (opts.settings?.storageState !== undefined) {
           throw new SetupError("a saved state can't be combined with persist; use one or the other");
         }
-        const context = await type
-          .launchPersistentContext(profile, { ...launch, ...contextOptions(opts) })
-          .catch((error) => {
-            throw launchError(error, wanted);
-          });
-        return { context, close: () => context.close() };
+        const { value: context, close } = await ownBrowser(
+          () => type.launchPersistentContext(profile, { ...launch, ...contextOptions(opts) }),
+          (opened) => opened.close(),
+        ).catch((error) => {
+          throw launchError(error, wanted);
+        });
+        return { context, close };
       },
       close: async () => {},
     };
   }
 
   // Launched once, however many sessions open at the same moment.
-  let launching: Promise<Browser> | null = null;
+  let launching: Promise<{ value: Browser; close(): Promise<void> }> | null = null;
   return {
     attached: false,
     windowed: options.headed,
     async open(opts) {
-      launching ??= type.launch(launch).catch((error) => {
+      launching ??= ownBrowser(
+        () => type.launch(launch),
+        (browser) => browser.close(),
+      ).catch((error) => {
         launching = null;
         throw launchError(error, wanted);
       });
-      const context = await (await launching).newContext(contextOptions(opts));
+      const context = await (await launching).value.newContext(contextOptions(opts));
       return { context, close: () => context.close() };
     },
     async close() {
-      const launched = launching;
+      const launched = await launching?.catch(() => null);
       launching = null;
-      // Whatever state the browser is in (still launching, already gone), closing never throws.
-      await (await launched?.catch(() => null))?.close().catch(() => {});
+      await launched?.close();
     },
   };
 }
