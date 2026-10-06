@@ -38,15 +38,15 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]
 // A process killed outright (SIGKILL, a crash, the OOM killer) runs none
 // of the above. So a watcher is started beside every weblab that serves:
 // a shell holding a pipe from this process, which closes however this one
-// ends. A teardown that ran to the end tells it so, and it just goes;
-// otherwise it runs weblab's sweep (reaper.ts), which stops whatever this
+// ends. A teardown that ran to the end tells it so, and it just goes.
+// Otherwise it runs weblab's sweep (reaper.ts), which stops whatever this
 // one left. It is in a group of its own, so a signal to this one's group
 // doesn't reach it, and it is only a shell until it has something to do.
 let watcher: ChildProcess | null = null;
 
 export function watchOver(): void {
   if (watcher !== null) return;
-  // Compiled, weblab is its own executable; from source, bun runs main.ts.
+  // Compiled, weblab is its own executable. From source, bun runs main.ts.
   const self = Bun.main.startsWith("/$bunfs/") ? [] : [Bun.main];
   // `read` blocks until a line or the end of the pipe: the whole wait is the shell's own.
   watcher = spawn("/bin/sh", ["-c", 'read -r line; [ "$line" = done ] || exec "$0" "$@"', process.execPath, ...self, "--sweep"], {

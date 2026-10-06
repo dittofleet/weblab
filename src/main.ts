@@ -25,7 +25,7 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 
 const [flag] = process.argv.slice(2);
 if (flag === "--sweep") {
-  // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended; only what it needs is loaded.
+  // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended. Only what it needs is loaded.
   const { sweep } = await import("./reaper.ts");
   await sweep();
   process.exit(0);

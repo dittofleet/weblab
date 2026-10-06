@@ -521,7 +521,7 @@ test("two weblabs share a server, the last to end stops it, and one that is kill
   await one.close();
   assert.equal(await answers(origin), true);
 
-  // Killed outright, it can stop nothing itself; its watcher stops its
+  // Killed outright, it can stop nothing itself. Its watcher stops its
   // browser and the server no live weblab uses, without waiting for another weblab.
   await two.kill("SIGKILL");
   await gone(theirs);
