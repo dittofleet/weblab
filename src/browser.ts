@@ -1,9 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "node:path";
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type BrowserType, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { briefError, SetupError, UsageError } from "./errors.ts";
+import { ownBrowser, type OwnedBrowser } from "./reaper.ts";
 import { profileDir } from "./state.ts";
 import { openedByWeblab } from "./tabs.ts";
 import type { App, ContextSettings, Viewport } from "./types.ts";
@@ -230,6 +232,15 @@ function attachManager(app: App): BrowserManager {
   };
 }
 
+const CLOSE_TIMEOUT_MS = 5000;
+
+// A browser weblab launched is closed, and then made sure of: one that
+// hangs, or leaves a helper behind, is stopped. Closing never throws.
+async function closeOwned(close: () => Promise<void>, owned: OwnedBrowser): Promise<void> {
+  await Promise.race([close().catch(() => {}), sleep(CLOSE_TIMEOUT_MS)]);
+  await owned.release();
+}
+
 export function createBrowserManager(app: App, options: { headed: boolean }): BrowserManager {
   if (app.settings.attach !== undefined) return attachManager(app);
 
@@ -269,35 +280,32 @@ export function createBrowserManager(app: App, options: { headed: boolean }): Br
         if (opts.settings?.storageState !== undefined) {
           throw new SetupError("a saved state can't be combined with persist; use one or the other");
         }
-        const context = await type
-          .launchPersistentContext(profile, { ...launch, ...contextOptions(opts) })
-          .catch((error) => {
-            throw launchError(error, wanted);
-          });
-        return { context, close: () => context.close() };
+        const { value: context, owned } = await ownBrowser(() => type.launchPersistentContext(profile, { ...launch, ...contextOptions(opts) })).catch((error) => {
+          throw launchError(error, wanted);
+        });
+        return { context, close: () => closeOwned(() => context.close(), owned) };
       },
       close: async () => {},
     };
   }
 
   // Launched once, however many sessions open at the same moment.
-  let launching: Promise<Browser> | null = null;
+  let launching: Promise<{ value: Browser; owned: OwnedBrowser }> | null = null;
   return {
     attached: false,
     windowed: options.headed,
     async open(opts) {
-      launching ??= type.launch(launch).catch((error) => {
+      launching ??= ownBrowser(() => type.launch(launch)).catch((error) => {
         launching = null;
         throw launchError(error, wanted);
       });
-      const context = await (await launching).newContext(contextOptions(opts));
+      const context = await (await launching).value.newContext(contextOptions(opts));
       return { context, close: () => context.close() };
     },
     async close() {
-      const launched = launching;
+      const launched = await launching?.catch(() => null);
       launching = null;
-      // Whatever state the browser is in (still launching, already gone), closing never throws.
-      await (await launched?.catch(() => null))?.close().catch(() => {});
+      if (launched != null) await closeOwned(() => launched.value.close(), launched.owned);
     },
   };
 }

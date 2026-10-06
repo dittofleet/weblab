@@ -11,8 +11,8 @@ import { join as joinPath } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { dependenciesMissing, devCommand, projectOrigin, SERVER_TIMEOUT_MS } from "./app.ts";
 import { SetupError, stripAnsi, tail } from "./errors.ts";
-import { onTeardown } from "./lifecycle.ts";
-import { alive, allListeners, cwdOf, groupMembers, groupOf, killGroup, killProcess, listenersOn, startedAtMs, startTime } from "./processes.ts";
+import { onTeardown, watchOver } from "./lifecycle.ts";
+import { alive, allListeners, cwdOf, groupMembers, groupOf, isProcess, killGroup, killProcess, listenersOn, startedAtMs, startTime } from "./processes.ts";
 import { acquireLock, clearRecord, fileName, readRecord, recordNames, writeRecord } from "./state.ts";
 import type { App } from "./types.ts";
 
@@ -100,9 +100,6 @@ const readState = (name: string) => readRecord<ServerState>(name);
 const locked = (name: string, log: (line: string) => void) =>
   acquireLock(name, { busy: () => null, waiting: (holder) => log(`waiting for another weblab (pid ${holder}) that is starting this server`) });
 
-// Whether a process is the one a record names: alive, with the start time recorded for it.
-const isProcess = (pid: number, startedAt: string | null) => startedAt !== null && alive(pid) && startTime(pid) === startedAt;
-
 // A process that started after weblab spawned the server.
 // Start times are kept to the second, so "after" is the spawn's second or later.
 const startedSince = (pid: number, spawnedAt: number | undefined) => {
@@ -127,7 +124,11 @@ const recordMembers = (state: ServerState) => {
   state.members = groupMembers(state.pgid).map((pid) => ({ pid, startedAt: startTime(pid) }));
 };
 
-const me = (): User => ({ pid: process.pid, startedAt: startTime(process.pid) });
+// Every time this process puts itself down as a server's user, its reaper is watching.
+const me = (): User => {
+  watchOver();
+  return { pid: process.pid, startedAt: startTime(process.pid) };
+};
 const usersOf = (state: ServerState): User[] => (state.users ?? []).filter((user) => isProcess(user.pid, user.startedAt));
 const othersUsing = (state: ServerState): User[] => usersOf(state).filter((user) => user.pid !== process.pid);
 

@@ -85,7 +85,7 @@ So weblab won't take that folder as the project when its repository is checked o
 - It stops when the last session using it ends. `end` says which happened: `stopped the server at ...`, or `left the server at ... running: another session is using it, and the last one stops it`.
 - A server weblab did not start is never stopped: `left the server at ... running, as weblab didn't start it`.
 - A server that puts itself in the background and exits (as `astro dev` does) is followed by the port it listens on, and stopped all the same.
-- When weblab exits, its sessions end and its servers are let go of the same way. If a weblab process is killed outright, the next weblab to start stops the servers it left that no live weblab is using.
+- When weblab exits (the client goes, or it is sent a signal), its sessions end and its servers are let go of the same way, and the browsers it launched are closed. If a weblab process is killed outright, a small reaper process weblab started alongside it stops the browsers it launched at once, and the servers it started that no live weblab is using; if the reaper was killed too, the next weblab to start does. A browser or app weblab only attached to, and a server weblab didn't start, are never stopped.
 - A server's output goes to `server-<host>-<port>.log` in the session's files directory (`server-<pid>-<n>.log` when the server chose its own address). When a server fails to start, the error names that log and quotes its last lines.
 
 ### attach

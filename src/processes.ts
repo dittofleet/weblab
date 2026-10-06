@@ -6,8 +6,18 @@ import { tryExec } from "./util.ts";
 
 const GRACE_MS = 4000;
 
+// A weblab that has exited but not yet been reaped by its parent still
+// answers kill(0). The reaper, which knows it has gone, says so here.
+let departed: { pid: number; startedAt: string | null } | null = null;
+
+/** Has the process count as gone from here on, though it may linger unreaped; not a process that took its pid since. */
+export function departedProcess(pid: number, startedAt: string | null): void {
+  departed = { pid, startedAt };
+}
+
 /** True while the pid (or, negated, the process group) exists. */
 export const alive = (pid: number): boolean => {
+  if (departed !== null && pid === departed.pid && startTime(pid) === departed.startedAt) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -29,6 +39,9 @@ export const startTime = (pid: number): string | null => {
     return null;
   }
 };
+
+/** Whether a process is the one a record names: alive, with the start time recorded for it. */
+export const isProcess = (pid: number, startedAt: string | null) => startedAt !== null && alive(pid) && startTime(pid) === startedAt;
 
 /** SIGTERM, a grace period, then SIGKILL: to a process, or (negated) a whole group. */
 async function terminate(target: number): Promise<void> {
@@ -101,3 +114,11 @@ export const cwdOf = (pid: number): string | null => {
   const listed = tryExec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
   return listed?.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? null;
 };
+
+/** The processes a pid started that lead a process group of their own, with their command lines. */
+export const groupLeadersStartedBy = (parent: number): { pid: number; command: string }[] =>
+  (tryExec("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,command="]) ?? "")
+    .split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line))
+    .filter((match) => match !== null && Number(match[2]) === parent && match[1] === match[3])
+    .map((match) => ({ pid: Number(match![1]), command: match![4] as string }));
