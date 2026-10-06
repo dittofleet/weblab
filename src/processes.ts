@@ -7,7 +7,7 @@ import { tryExec } from "./util.ts";
 const GRACE_MS = 4000;
 
 // A weblab that has exited but not yet been reaped by its parent still
-// answers kill(0). The reaper, which knows it has gone, says so here.
+// answers kill(0). The sweep run after it, which knows it has gone, says so here.
 let departed: { pid: number; startedAt: string | null } | null = null;
 
 /** Has the process count as gone from here on, though it may linger unreaped; not a process that took its pid since. */

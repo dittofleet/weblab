@@ -23,11 +23,11 @@ Its tools: new (open a session), run (run steps on one), end, list, docs.
 // make an Electron app it starts run as plain Node.
 delete process.env.ELECTRON_RUN_AS_NODE;
 
-const [flag, arg] = process.argv.slice(2);
-if (flag === "--reap") {
-  // weblab's own reaper (lifecycle.ts), not for anyone to run: only what it needs is loaded.
-  const { reap } = await import("./reaper.ts");
-  await reap(Number(arg));
+const [flag, ...args] = process.argv.slice(2);
+if (flag === "--sweep-after") {
+  // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended; only what it needs is loaded.
+  const { sweepAfter } = await import("./reaper.ts");
+  await sweepAfter(Number(args[0]), args[1] || null);
   process.exit(0);
 } else if (flag === "--version" || flag === "-v") {
   console.log(VERSION);
@@ -53,7 +53,7 @@ if (flag === "--reap") {
     import("./sessions.ts"),
   ]);
 
-  // Whatever a weblab that was killed left running, if its reaper didn't get to it.
+  // Whatever a weblab that was killed left running, if its watcher didn't get to it.
   await sweep();
 
   // Sessions end with the process: browsers closed, videos written, servers let go of.

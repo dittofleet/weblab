@@ -155,8 +155,8 @@ function browsersOf(lab: Weblab): number[] {
 /** The processes left in a group: a browser and its helpers. */
 const inGroup = (pgid: number) => processes().filter((one) => one.pgid === pgid);
 
-/** The reaper watching over a weblab. */
-const reaperOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --reap /.test(one.command))?.pid;
+/** The watcher started beside a weblab, to sweep up after it. */
+const watcherOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --sweep-after /.test(one.command))?.pid;
 
 /** Waits for a condition, and says what didn't happen if it never does. */
 async function eventually(check: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
@@ -521,7 +521,7 @@ test("two weblabs share a server, the last to end stops it, and one that is kill
   await one.close();
   assert.equal(await answers(origin), true);
 
-  // Killed outright, it can stop nothing itself; its reaper stops its
+  // Killed outright, it can stop nothing itself; its watcher stops its
   // browser and the server no live weblab uses, without waiting for another weblab.
   two.child.kill("SIGKILL");
   await new Promise((done) => two.child.on("exit", done));
@@ -529,7 +529,7 @@ test("two weblabs share a server, the last to end stops it, and one that is kill
   await eventually(async () => !(await answers(origin)), "the server it alone was using stops");
 });
 
-test("killed along with its reaper, a weblab's browser and server are stopped by the next weblab to start, and only they", async () => {
+test("killed along with its watcher, a weblab's browser and server are stopped by the next weblab to start, and only they", async () => {
   // Someone else's browser, which weblab has only joined: left running.
   const external = await runningChrome("external", "theirs");
   try {
@@ -542,14 +542,14 @@ test("killed along with its reaper, a weblab's browser and server are stopped by
       const origin = originIn(opened.text);
       const [browser] = browsersOf(lab);
       assert.ok(browser !== undefined);
-      const reaper = reaperOf(lab);
-      assert.ok(reaper !== undefined, "a weblab that starts something has a reaper");
+      const watcher = watcherOf(lab);
+      assert.ok(watcher !== undefined, "a weblab that starts something has a watcher");
 
-      process.kill(reaper, "SIGKILL");
+      process.kill(watcher, "SIGKILL");
       lab.child.kill("SIGKILL");
       await new Promise((done) => lab.child.on("exit", done));
       await sleep(500);
-      assert.ok(inGroup(browser).length > 0, "with no reaper, nothing has stopped it yet");
+      assert.ok(inGroup(browser).length > 0, "with no watcher, nothing has stopped it yet");
       assert.equal(await answers(origin), true);
 
       const next = weblab();

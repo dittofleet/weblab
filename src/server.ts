@@ -124,7 +124,7 @@ const recordMembers = (state: ServerState) => {
   state.members = groupMembers(state.pgid).map((pid) => ({ pid, startedAt: startTime(pid) }));
 };
 
-// Every time this process puts itself down as a server's user, its reaper is watching.
+// Every time this process puts itself down as a server's user, its watcher is started.
 const me = (): User => {
   watchOver();
   return { pid: process.pid, startedAt: startTime(process.pid) };

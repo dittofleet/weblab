@@ -10,7 +10,7 @@
 //                       started, and which weblab owns it
 //   server.<...>.json   a server weblab started, and who is using it (server.ts)
 //
-// Whatever a weblab that is gone left recorded is stopped by its reaper
+// Whatever a weblab that is gone left recorded is stopped by its watcher
 // (lifecycle.ts) the moment it goes, and failing that, by the next
 // weblab to start. Only a recorded process still running as recorded (the
 // same pid, started at the same time) is stopped, so a recycled pid, a
@@ -127,17 +127,10 @@ export async function sweep(): Promise<void> {
 }
 
 /**
- * The reaper: waits for the weblab that started it to end, whichever way
- * it does (its pipe closes), and sweeps up after it.
+ * Run by the watcher (lifecycle.ts) once the weblab that started it has
+ * ended, whichever way it did: sweeps up after it.
  */
-export async function reap(owner: number): Promise<void> {
-  const startedAt = startTime(owner);
-  await new Promise<void>((done) => {
-    process.stdin.on("end", done);
-    process.stdin.on("close", done);
-    process.stdin.on("error", () => done());
-    process.stdin.resume();
-  });
+export async function sweepAfter(owner: number, startedAt: string | null): Promise<void> {
   // Ended, though its parent may not have collected it yet.
   departedProcess(owner, startedAt);
   await sweep();
