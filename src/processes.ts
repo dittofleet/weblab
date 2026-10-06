@@ -6,18 +6,8 @@ import { tryExec } from "./util.ts";
 
 const GRACE_MS = 4000;
 
-// A weblab that has exited but not yet been reaped by its parent still
-// answers kill(0). The sweep run after it, which knows it has gone, says so here.
-let departed: { pid: number; startedAt: string | null } | null = null;
-
-/** Has the process count as gone from here on, though it may linger unreaped; not a process that took its pid since. */
-export function departedProcess(pid: number, startedAt: string | null): void {
-  departed = { pid, startedAt };
-}
-
 /** True while the pid (or, negated, the process group) exists. */
 export const alive = (pid: number): boolean => {
-  if (departed !== null && pid === departed.pid && startTime(pid) === departed.startedAt) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -26,18 +16,25 @@ export const alive = (pid: number): boolean => {
   }
 };
 
-/** When the process started, as `ps` prints it, so a recycled pid can be told apart. */
+/** A process as a record names it: by pid, and by when it started, so a pid used again since is told apart. */
+export type Process = { pid: number; startedAt: string | null };
+
+export const processOf = (pid: number): Process => ({ pid, startedAt: startTime(pid) });
+
+// The same zone and locale for every reading of a start time, so one process reads the same from any shell.
+const PS_ENV = { ...process.env, TZ: "UTC", LC_ALL: "C" };
+
+// As `ps` prints a start time: "Mon Oct  5 19:48:41 2026".
+const STARTED = /\w{3} \w{3} [ \d]\d \d\d:\d\d:\d\d \d{4}/;
+
+// A process that has exited but not been collected by its parent yet (a
+// zombie) is gone for every purpose here, though it still answers kill(0).
+const started = (stat: string, time: string) => (stat.startsWith("Z") ? null : time);
+
+/** When the process started, as `ps` prints it, or null if it has gone (or is a zombie). */
 export const startTime = (pid: number): string | null => {
-  try {
-    // A fixed zone and locale, so the same process reads the same from any shell.
-    const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, TZ: "UTC", LC_ALL: "C" },
-    });
-    return out.toString().trim() || null;
-  } catch {
-    return null;
-  }
+  const match = /^\s*(\S+)\s+(.*)$/.exec(tryExec("ps", ["-o", "stat=,lstart=", "-p", String(pid)], { env: PS_ENV }) ?? "");
+  return match === null ? null : started(match[1] as string, match[2] as string);
 };
 
 /** Whether a process is the one a record names: alive, with the start time recorded for it. */
@@ -101,13 +98,27 @@ export const startedAtMs = (pid: number): number | null => {
   return Number.isNaN(ms) ? null : ms;
 };
 
+type Listed = Process & { ppid: number; pgid: number; command: string };
+
+const LISTED = new RegExp(`^\\s*(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\S+)\\s+(${STARTED.source})\\s+(.*)$`);
+
+/** Every process, with its parent, its group, when it started and its command line. */
+export const processTable = (): Listed[] =>
+  (tryExec("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="], { env: PS_ENV }) ?? "").split("\n").flatMap((line) => {
+    const match = LISTED.exec(line);
+    if (match === null) return [];
+    const [, pid, ppid, pgid, stat, time, command] = match as unknown as string[];
+    return [{ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), startedAt: started(stat as string, time as string), command: command as string }];
+  });
+
 /** Every pid in a process group. */
-export const groupMembers = (pgid: number): number[] =>
-  (tryExec("ps", ["-A", "-o", "pid=,pgid="]) ?? "")
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(([, group]) => group === pgid)
-    .map(([pid]) => pid as number);
+export const groupMembers = (pgid: number): number[] => membersOf(pgid).map((member) => member.pid);
+
+/** Every process in a group, as a record names them. */
+export const membersOf = (pgid: number): Process[] =>
+  processTable()
+    .filter((listed) => listed.pgid === pgid)
+    .map(({ pid, startedAt }) => ({ pid, startedAt }));
 
 /** A process's working directory, as lsof sees it, or null. */
 export const cwdOf = (pid: number): string | null => {
@@ -115,10 +126,5 @@ export const cwdOf = (pid: number): string | null => {
   return listed?.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? null;
 };
 
-/** The processes a pid started that lead a process group of their own, with their command lines. */
-export const groupLeadersStartedBy = (parent: number): { pid: number; command: string }[] =>
-  (tryExec("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,command="]) ?? "")
-    .split("\n")
-    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line))
-    .filter((match) => match !== null && Number(match[2]) === parent && match[1] === match[3])
-    .map((match) => ({ pid: Number(match![1]), command: match![4] as string }));
+/** The processes a pid started that lead a process group of their own. */
+export const groupLeadersStartedBy = (parent: number): Listed[] => processTable().filter((listed) => listed.ppid === parent && listed.pid === listed.pgid);

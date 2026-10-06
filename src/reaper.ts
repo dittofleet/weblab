@@ -17,12 +17,10 @@
 // browser weblab only attached to, or another weblab's (in any checkout)
 // is never touched. A server another live weblab still uses stays up.
 import { setTimeout as sleep } from "node:timers/promises";
-import { watchOver } from "./lifecycle.ts";
-import { departedProcess, groupLeadersStartedBy, groupMembers, isProcess, killGroup, killProcess, startTime } from "./processes.ts";
+import { groupLeadersStartedBy, isProcess, killGroup, killProcess, membersOf, type Process, processOf } from "./processes.ts";
 import { sweepServers } from "./server.ts";
 import { clearRecord, readRecord, recordNames, writeRecord } from "./state.ts";
 
-type Process = { pid: number; startedAt: string | null };
 type BrowserState = Process & {
   owner: Process;
   /** Its helpers, as last seen, so one that outlives it (hung) is still found. */
@@ -36,9 +34,11 @@ const recordName = (pid: number) => `browser.${pid}`;
 const DRIVEN = /\s(--remote-debugging-pipe|-juggler-pipe|--inspector-pipe)(\s|$)/;
 const browsersStarted = () => groupLeadersStartedBy(process.pid).filter((child) => DRIVEN.test(child.command)).map((child) => child.pid);
 
+// How long a browser gets to close when asked, and then to go.
+const CLOSE_TIMEOUT_MS = 5000;
 const CLOSE_GRACE_MS = 3000;
-
-const membersOf = (pid: number): Process[] => groupMembers(pid).map((member) => ({ pid: member, startedAt: startTime(member) }));
+// How often a launch is looked in on, so a weblab killed during one leaves a record.
+const LOOK_EVERY_MS = 250;
 
 // What is recorded is what is checked: a process is only ever the one
 // recorded (the same pid, started at the same time), so a pid given out
@@ -62,67 +62,53 @@ async function stop(state: BrowserState, graceMs: number): Promise<void> {
   clearRecord(recordName(state.pid));
 }
 
-export type OwnedBrowser = {
-  /** After the browser was asked to close: waits for it to go, stops it if it doesn't, and forgets it. */
-  release(): Promise<void>;
-};
-
 // One launch at a time in this process, so each knows which browser is its.
 let launches: Promise<unknown> = Promise.resolve();
 
 /**
- * Launches a browser as weblab's own. It is recorded as soon as it
- * appears, before Playwright has even finished with it, so a weblab
- * killed mid-launch leaves it to the reaper too. A launch that fails
- * stops whatever it started.
+ * Launches a browser as weblab's own, and hands back a close that makes
+ * sure of it. The browser is recorded as soon as it appears, before
+ * Playwright has even finished with it, so a weblab killed mid-launch
+ * leaves it to the watcher too. A launch that fails stops whatever it started.
  */
-export function ownBrowser<T>(launch: () => Promise<T>): Promise<{ value: T; owned: OwnedBrowser }> {
-  const turn = launches.then(() => tracked(launch));
+export function ownBrowser<T>(launch: () => Promise<T>, close: (value: T) => Promise<void>): Promise<{ value: T; close(): Promise<void> }> {
+  const turn = launches.then(() => tracked(launch, close));
   launches = turn.catch(() => {});
   return turn;
 }
 
-async function tracked<T>(launch: () => Promise<T>): Promise<{ value: T; owned: OwnedBrowser }> {
-  watchOver();
+async function tracked<T>(launch: () => Promise<T>, close: (value: T) => Promise<void>): Promise<{ value: T; close(): Promise<void> }> {
   const before = new Set(browsersStarted());
-  const owner: Process = { pid: process.pid, startedAt: startTime(process.pid) };
+  const owner = processOf(process.pid);
   const found = new Map<number, BrowserState>();
   const look = () => {
     for (const pid of browsersStarted()) {
       if (before.has(pid) || found.has(pid)) continue;
-      const state = { pid, startedAt: startTime(pid), owner };
+      const state = { ...processOf(pid), owner };
       found.set(pid, state);
       writeRecord(recordName(pid), state);
     }
   };
-  let launching = true;
-  const watching = (async () => {
-    while (launching) {
-      look();
-      await sleep(50);
-    }
-  })();
-  const owned: OwnedBrowser = {
-    release: async () => {
-      for (const state of found.values()) remember(state);
-      await Promise.all([...found.values()].map((state) => stop(state, CLOSE_GRACE_MS)));
+  const looking = setInterval(look, LOOK_EVERY_MS);
+  const [outcome] = await Promise.allSettled([launch()]);
+  clearInterval(looking);
+  look();
+  const states = [...found.values()];
+  if (outcome.status === "rejected") {
+    await Promise.all(states.map((state) => stop(state, 0)));
+    throw outcome.reason;
+  }
+  for (const state of states) remember(state);
+  const { value } = outcome;
+  return {
+    value,
+    // Asked to close, then made sure of: one that hangs, or leaves a helper behind, is stopped. Never throws.
+    async close() {
+      for (const state of states) remember(state);
+      await Promise.race([close(value).catch(() => {}), sleep(CLOSE_TIMEOUT_MS)]);
+      await Promise.all(states.map((state) => stop(state, CLOSE_GRACE_MS)));
     },
   };
-  try {
-    const value = await launch();
-    return { value, owned };
-  } catch (error) {
-    launching = false;
-    await watching;
-    look();
-    await Promise.all([...found.values()].map((state) => stop(state, 0)));
-    throw error;
-  } finally {
-    launching = false;
-    await watching;
-    look();
-    for (const state of found.values()) remember(state);
-  }
 }
 
 /** Stops every browser recorded by a weblab that is no longer running. */
@@ -138,18 +124,12 @@ async function sweepBrowsers(): Promise<void> {
   }
 }
 
-/** Stops whatever weblabs that are gone left: their browsers, and servers no live weblab uses. */
+/**
+ * Stops whatever weblabs that are gone left: their browsers, and servers
+ * no live weblab uses. Run when a weblab starts, and by its watcher when
+ * it has ended.
+ */
 export async function sweep(): Promise<void> {
   await sweepBrowsers().catch(() => {});
   await sweepServers().catch(() => {});
-}
-
-/**
- * Run by the watcher (lifecycle.ts) once the weblab that started it has
- * ended, whichever way it did: sweeps up after it.
- */
-export async function sweepAfter(owner: number, startedAt: string | null): Promise<void> {
-  // Ended, though its parent may not have collected it yet.
-  departedProcess(owner, startedAt);
-  await sweep();
 }

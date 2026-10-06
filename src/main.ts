@@ -23,11 +23,11 @@ Its tools: new (open a session), run (run steps on one), end, list, docs.
 // make an Electron app it starts run as plain Node.
 delete process.env.ELECTRON_RUN_AS_NODE;
 
-const [flag, ...args] = process.argv.slice(2);
-if (flag === "--sweep-after") {
+const [flag] = process.argv.slice(2);
+if (flag === "--sweep") {
   // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended; only what it needs is loaded.
-  const { sweepAfter } = await import("./reaper.ts");
-  await sweepAfter(Number(args[0]), args[1] || null);
+  const { sweep } = await import("./reaper.ts");
+  await sweep();
   process.exit(0);
 } else if (flag === "--version" || flag === "-v") {
   console.log(VERSION);
@@ -45,7 +45,7 @@ if (flag === "--sweep-after") {
   // runs prints goes to stderr.
   globalThis.console = new Console({ stdout: process.stderr, stderr: process.stderr }) as unknown as typeof console;
 
-  const [{ serveStdio }, { onTeardown, teardown }, { createServer }, { sweep }, { shutdown }] = await Promise.all([
+  const [{ serveStdio }, { onTeardown, teardown, watchOver }, { createServer }, { sweep }, { shutdown }] = await Promise.all([
     import("@modelcontextprotocol/server/stdio"),
     import("./lifecycle.ts"),
     import("./mcp.ts"),
@@ -55,6 +55,8 @@ if (flag === "--sweep-after") {
 
   // Whatever a weblab that was killed left running, if its watcher didn't get to it.
   await sweep();
+  // And whatever this one may leave, if it is killed.
+  watchOver();
 
   // Sessions end with the process: browsers closed, videos written, servers let go of.
   onTeardown(shutdown);

@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { startTime } from "./processes.ts";
 
 // Whatever is still open when the process is told to go: its sessions'
 // browsers, a server weblab started, a lock. A signal runs the same
@@ -36,21 +35,19 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]
 }
 
 // A process killed outright (SIGKILL, a crash, the OOM killer) runs none
-// of the above. So once weblab starts something of its own (a browser, a
-// server, or a share in one) a watcher is started beside it: a shell
-// holding a pipe from this process, which closes however this one ends.
-// Then it runs weblab's sweep (reaper.ts), which stops what this one left.
-// It is in a group of its own, so a signal to this one's group doesn't
-// reach it, and it is only a shell until it has something to do.
+// of the above. So a watcher is started beside every weblab that serves:
+// a shell holding a pipe from this process, which closes however this one
+// ends. Then it runs weblab's sweep (reaper.ts), which stops whatever
+// this one left. It is in a group of its own, so a signal to this one's
+// group doesn't reach it, and it is only a shell until it has something to do.
 let watcher: ChildProcess | null = null;
 
 export function watchOver(): void {
   if (watcher !== null) return;
   // Compiled, weblab is its own executable; from source, bun runs main.ts.
   const self = Bun.main.startsWith("/$bunfs/") ? [] : [Bun.main];
-  const sweep = [process.execPath, ...self, "--sweep-after", String(process.pid), startTime(process.pid) ?? ""];
   // `read` blocks until a line or the end of the pipe: the whole wait is the shell's own.
-  watcher = spawn("/bin/sh", ["-c", 'while read -r _; do :; done; exec "$0" "$@"', ...sweep], {
+  watcher = spawn("/bin/sh", ["-c", 'while read -r _; do :; done; exec "$0" "$@"', process.execPath, ...self, "--sweep"], {
     detached: true,
     stdio: ["pipe", "ignore", "ignore"],
     cwd: "/",

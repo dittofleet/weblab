@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { processTable as processes } from "../src/processes.ts";
 import { STEP_NAMES } from "../src/steps/index.ts";
 import { onPath } from "../src/util.ts";
 
@@ -53,6 +54,8 @@ type Weblab = {
   tool(name: string, args?: Record<string, unknown>): Promise<Reply>;
   /** Closes its stdin, as a client going away does, and waits for it to exit. */
   close(): Promise<void>;
+  /** Sends it a signal, and waits for it to exit. */
+  kill(signal: NodeJS.Signals): Promise<void>;
 };
 
 const all: Weblab[] = [];
@@ -102,6 +105,10 @@ function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
       child.stdin!.end();
       await exited;
     },
+    kill(signal) {
+      child.kill(signal);
+      return exited;
+    },
   };
   all.push(made);
   return made;
@@ -133,13 +140,6 @@ const freePort = () =>
 
 // ---- the processes weblab starts
 
-const processes = () =>
-  execFileSync("ps", ["-A", "-ww", "-o", "pid=,ppid=,pgid=,command="], { encoding: "utf8" })
-    .split("\n")
-    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line))
-    .filter((match) => match !== null)
-    .map((match) => ({ pid: Number(match![1]), ppid: Number(match![2]), pgid: Number(match![3]), command: match![4] as string }));
-
 // Every browser group a test saw, to make sure at the end that none is left.
 const browserGroups = new Set<number>();
 
@@ -156,7 +156,7 @@ function browsersOf(lab: Weblab): number[] {
 const inGroup = (pgid: number) => processes().filter((one) => one.pgid === pgid);
 
 /** The watcher started beside a weblab, to sweep up after it. */
-const watcherOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --sweep-after /.test(one.command))?.pid;
+const watcherOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --sweep$/.test(one.command))?.pid;
 
 /** Waits for a condition, and says what didn't happen if it never does. */
 async function eventually(check: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
@@ -523,8 +523,7 @@ test("two weblabs share a server, the last to end stops it, and one that is kill
 
   // Killed outright, it can stop nothing itself; its watcher stops its
   // browser and the server no live weblab uses, without waiting for another weblab.
-  two.child.kill("SIGKILL");
-  await new Promise((done) => two.child.on("exit", done));
+  await two.kill("SIGKILL");
   await gone(theirs);
   await eventually(async () => !(await answers(origin)), "the server it alone was using stops");
 });
@@ -546,8 +545,7 @@ test("killed along with its watcher, a weblab's browser and server are stopped b
       assert.ok(watcher !== undefined, "a weblab that starts something has a watcher");
 
       process.kill(watcher, "SIGKILL");
-      lab.child.kill("SIGKILL");
-      await new Promise((done) => lab.child.on("exit", done));
+      await lab.kill("SIGKILL");
       await sleep(500);
       assert.ok(inGroup(browser).length > 0, "with no watcher, nothing has stopped it yet");
       assert.equal(await answers(origin), true);
@@ -577,7 +575,7 @@ test("a session ending, the client going, and a signal each leave no browser run
   await gone(shared);
   await ended.close();
 
-  for (const leave of [(lab: Weblab) => lab.close(), (lab: Weblab) => (lab.child.kill("SIGTERM"), new Promise((done) => lab.child.on("exit", done)))]) {
+  for (const leave of [(lab: Weblab) => lab.close(), (lab: Weblab) => lab.kill("SIGTERM")]) {
     const lab = weblab();
     assert.equal((await lab.tool("new", { ...BASE })).failed, false);
     const [browser] = browsersOf(lab);
