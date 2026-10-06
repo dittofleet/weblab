@@ -7,7 +7,7 @@
 //
 //   browser.<pid>.json  a browser weblab launched: its pid (it leads a
 //                       process group, its helpers' too), when it
-//                       started, and which weblab owns it
+//                       started, its helpers, and which weblab owns it
 //   server.<...>.json   a server weblab started, and who is using it (server.ts)
 //
 // Whatever a weblab that is gone left recorded is stopped by its watcher
@@ -18,12 +18,16 @@
 // is never touched. A server another live weblab still uses stays up.
 import { setTimeout as sleep } from "node:timers/promises";
 import { watchOver } from "./lifecycle.ts";
-import { departedProcess, groupLeadersStartedBy, isProcess, killGroup, startTime } from "./processes.ts";
+import { departedProcess, groupLeadersStartedBy, groupMembers, isProcess, killGroup, killProcess, startTime } from "./processes.ts";
 import { sweepServers } from "./server.ts";
 import { clearRecord, readRecord, recordNames, writeRecord } from "./state.ts";
 
-type Owner = { pid: number; startedAt: string | null };
-type BrowserState = { pid: number; startedAt: string | null; owner: Owner };
+type Process = { pid: number; startedAt: string | null };
+type BrowserState = Process & {
+  owner: Process;
+  /** Its helpers, as last seen, so one that outlives it (hung) is still found. */
+  members?: Process[];
+};
 
 const recordName = (pid: number) => `browser.${pid}`;
 
@@ -34,15 +38,27 @@ const browsersStarted = () => groupLeadersStartedBy(process.pid).filter((child) 
 
 const CLOSE_GRACE_MS = 3000;
 
-// The browser is still the one recorded: the same pid, started at the
-// same time. Its helpers exit by themselves once it has gone, and a pid
-// given out again since (after a reboot, say) is never signalled.
-const remains = (state: BrowserState) => isProcess(state.pid, state.startedAt);
+const membersOf = (pid: number): Process[] => groupMembers(pid).map((member) => ({ pid: member, startedAt: startTime(member) }));
 
-// Stopped if it hasn't gone by itself, and forgotten.
+// What is recorded is what is checked: a process is only ever the one
+// recorded (the same pid, started at the same time), so a pid given out
+// again since (after a reboot, say) is never signalled.
+const leaderRemains = (state: BrowserState) => isProcess(state.pid, state.startedAt);
+const helpersRemaining = (state: BrowserState) => (state.members ?? []).filter((member) => isProcess(member.pid, member.startedAt));
+const remains = (state: BrowserState) => leaderRemains(state) || helpersRemaining(state).length > 0;
+
+// Its helpers come and go as pages do: noted again at each turn, for the sweep.
+const remember = (state: BrowserState) => {
+  state.members = membersOf(state.pid);
+  writeRecord(recordName(state.pid), state);
+};
+
+// Stopped if it hasn't gone by itself, and forgotten: the whole group
+// while the browser leads it, or else whichever helpers outlived it.
 async function stop(state: BrowserState, graceMs: number): Promise<void> {
   for (let waited = 0; waited < graceMs && remains(state); waited += 100) await sleep(100);
-  if (remains(state)) await killGroup(state.pid);
+  if (leaderRemains(state)) await killGroup(state.pid);
+  await Promise.all(helpersRemaining(state).map((member) => killProcess(member.pid)));
   clearRecord(recordName(state.pid));
 }
 
@@ -69,7 +85,7 @@ export function ownBrowser<T>(launch: () => Promise<T>): Promise<{ value: T; own
 async function tracked<T>(launch: () => Promise<T>): Promise<{ value: T; owned: OwnedBrowser }> {
   watchOver();
   const before = new Set(browsersStarted());
-  const owner: Owner = { pid: process.pid, startedAt: startTime(process.pid) };
+  const owner: Process = { pid: process.pid, startedAt: startTime(process.pid) };
   const found = new Map<number, BrowserState>();
   const look = () => {
     for (const pid of browsersStarted()) {
@@ -88,6 +104,7 @@ async function tracked<T>(launch: () => Promise<T>): Promise<{ value: T; owned: 
   })();
   const owned: OwnedBrowser = {
     release: async () => {
+      for (const state of found.values()) remember(state);
       await Promise.all([...found.values()].map((state) => stop(state, CLOSE_GRACE_MS)));
     },
   };
@@ -104,6 +121,7 @@ async function tracked<T>(launch: () => Promise<T>): Promise<{ value: T; owned: 
     launching = false;
     await watching;
     look();
+    for (const state of found.values()) remember(state);
   }
 }
 

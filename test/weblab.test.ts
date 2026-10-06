@@ -587,6 +587,21 @@ test("a session ending, the client going, and a signal each leave no browser run
     assert.deepEqual(inGroup(browser), []);
   }
 
+  // A helper that outlives its browser (one that hangs) is stopped with it.
+  const hung = weblab();
+  assert.equal((await hung.tool("new", { ...BASE })).failed, false);
+  const [group] = browsersOf(hung);
+  assert.ok(group !== undefined);
+  const helper = inGroup(group).find((one) => one.pid !== group);
+  assert.ok(helper !== undefined);
+  process.kill(helper.pid, "SIGSTOP");
+  process.kill(group, "SIGKILL");
+  await eventually(() => !processes().some((one) => one.pid === group), "the browser has gone");
+  assert.ok(inGroup(group).some((one) => one.pid === helper.pid), "the stopped helper outlives it");
+  await hung.tool("end");
+  await gone(group);
+  await hung.close();
+
   // A session that fails to open leaves nothing it started.
   const failing = weblab();
   const refused = await failing.tool("new", { ...BASE, init: "nonesuch.js" });
