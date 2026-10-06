@@ -18,7 +18,7 @@
 // is never touched. A server another live weblab still uses stays up.
 import { setTimeout as sleep } from "node:timers/promises";
 import { watchOver } from "./lifecycle.ts";
-import { alive, departedProcess, groupLeadersStartedBy, isProcess, killGroup, startTime } from "./processes.ts";
+import { departedProcess, groupLeadersStartedBy, isProcess, killGroup, startTime } from "./processes.ts";
 import { sweepServers } from "./server.ts";
 import { clearRecord, readRecord, recordNames, writeRecord } from "./state.ts";
 
@@ -34,10 +34,10 @@ const browsersStarted = () => groupLeadersStartedBy(process.pid).filter((child) 
 
 const CLOSE_GRACE_MS = 3000;
 
-// Whatever of a browser is left: its group, as long as it has a process
-// in it (a pid isn't given out again while its group lasts), or else the
-// leader if it is still the one recorded.
-const remains = (state: BrowserState) => isProcess(state.pid, state.startedAt) || alive(-state.pid);
+// The browser is still the one recorded: the same pid, started at the
+// same time. Its helpers exit by themselves once it has gone, and a pid
+// given out again since (after a reboot, say) is never signalled.
+const remains = (state: BrowserState) => isProcess(state.pid, state.startedAt);
 
 // Stopped if it hasn't gone by itself, and forgotten.
 async function stop(state: BrowserState, graceMs: number): Promise<void> {
