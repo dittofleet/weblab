@@ -1,6 +1,6 @@
 # Tools
 
-This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages, whole or a section at a time. It lists every argument, what each reply holds, how weblab finds or starts the app, and where files go.
+This is the reference for weblab's MCP tools: `new`, `run`, `end` and `list`, which work with sessions, and `docs`, which hands back these pages, whole or a section at a time. It lists every argument, what each reply holds, when weblab starts the app, and where files go.
 
 A reply is text for the agent to read as it is, with each screenshot as an image right after the step that took it. A reply is marked as an error (`isError`) when the call could not be done, a step that never ran (written wrong, or on a session that isn't open) included, and the text says why. A step that ran and failed is not an error but a result: its `FAIL` line says why, and its screenshot comes with it, which a client showing an error's text alone would leave out.
 
@@ -8,15 +8,15 @@ Examples show a tool's arguments as JSON, under the tool's name, and the reply t
 
 ## new
 
-Opens a session: a browser of its own (its own cookies, storage and tabs) pointing at an address, with a name. With no arguments it opens a session named `main` at the project's dev server, starting the server if it isn't running, and goes to `/`.
+Opens a session: a browser of its own (its own cookies, storage and tabs) pointing at an address, with a name. `{ "address": 5173 }` opens a session named `main` at `http://localhost:5173` and goes to `/`. If nothing answers there, give `start` too, the command that starts the app there: `{ "address": 5173, "start": "pnpm vite --port 5173" }`.
 
 | Argument | What it says | Default |
 | --- | --- | --- |
 | `name` | What to call the session: what `run`, `end` and a step's `on` use. Letters, digits, dots, dashes and underscores, up to 32 characters. | `main`, then `session2`, `session3`, ... |
-| `address` | Where the app answers: a URL, `host:port`, or a port (`4000` is `http://localhost:4000`). A path on a URL is where the session goes first, unless `path` says otherwise. See [How an address is resolved](#how-an-address-is-resolved). | The project's dev server |
-| `start` | The command that starts the app when nothing answers at the address. It runs in the project directory with the address's port in `PORT`. | The project's `dev` script |
+| `address` | Where the app answers: a URL, `host:port`, or a port (`4000` is `http://localhost:4000`). A path on a URL is where the session goes first, unless `path` says otherwise. See [Where the app is, and how it starts](#where-the-app-is-and-how-it-starts). | Required, except with `attach` |
+| `start` | The command that starts the app when nothing answers at the address, run as it is in `dir`. It has to make the app listen at the address itself: weblab passes it nothing. | Nothing is started |
 | `startTimeout` | How long a server weblab starts gets to answer, in milliseconds. | `60000` |
-| `dir` | The project directory: where its `package.json`, dev script and `.env` are, and where relative paths in steps are read from. See [Which project](#which-project). | The `dir` the last session opened with, else where weblab was started |
+| `dir` | The project directory: where `start` runs, and where relative paths in steps are read from. See [Which project](#which-project). | The `dir` the last session opened with, else where weblab was started |
 | `path` | Where to go first: a path, resolved against the address, or a full URL. | `/`; with `attach`, wherever the browser already is |
 | `attach` | Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. See [attach](#attach). | Launch a browser |
 | `tab` | With `attach`: which tab to drive, by part of its URL or title. | The first tab |
@@ -41,9 +41,9 @@ Some combinations are refused with a message saying why: `tab`, `newTab` and `ma
 ### What `new` replies
 
 ```text
-session main  at http://localhost:5173 (server started by weblab: bun run dev)
+session main  at http://localhost:5173 (server started by weblab: pnpm vite --port 5173)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:5173 (bun run dev in ~/code/shop); it stops when the last session on it ends
+started the server at http://localhost:5173 (pnpm vite --port 5173 in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (566ms)
 url   http://localhost:5173/
 title Shop
@@ -58,35 +58,34 @@ console since the last reply:
 - The first `goto` is reported as step 1, as a `run` reports steps.
 - Then where the page is (`url`, `title`), its tabs if it has more than one, and what the console logged.
 
-When the session can't be opened, the reply is an error with the reason, such as `weblab: nothing answers at http://localhost:4000, and <project> has no dev script to start: give start, the command that starts it`. When it opens but the first page fails (it never becomes ready, say), the reply shows the failed `goto` and the session stays open.
+When the session can't be opened, the reply is an error with the reason, such as `weblab: nothing answers at http://localhost:4000: start the app there first, or give start, the command that starts it there`. When it opens but the first page fails (it never becomes ready, say), the reply shows the failed `goto` and the session stays open.
 
-### How an address is resolved
+### Where the app is, and how it starts
 
-A session with an `address` points there. Whatever already answers at that address (any HTTP answer, a 404 included) is used as it is, and left running. If a server weblab started is already recorded there, the session joins it. If nothing answers, weblab runs `start` (or the project's `dev` script) with `PORT` set to the address's port, and waits up to `startTimeout` for the address to answer. A command that reads its port some other way has to be told in `start`: `"start": "pnpm vite --port 4101"`.
+weblab doesn't guess where a project's app answers or how it is run. Every session says its `address` (a session that attaches to a running browser needs one only to start something).
 
-With no `address`, the session points at the project's own dev server:
+- Whatever already answers at the address (any HTTP answer, a 404 included) is used as it is, and left running.
+- If a server weblab started is already recorded there, the session joins it.
+- If nothing answers and the session gave `start`, weblab runs that command as it is, in `dir`, and waits up to `startTimeout` for the address to answer. It passes the command nothing, not even the port: `start` says where the app listens (`"start": "pnpm vite --port 4101"`), and a script that starts several servers (an app and its API) runs as it would in a terminal.
+- If nothing answers and there is no `start`, the session isn't opened, and the error says to start the app or give `start`.
 
-1. The `PORT` line in the project's `.env`, if something answers there (or weblab has a server recorded there). Only that line is read; nothing else in the file is kept or printed.
-2. Otherwise, a server weblab already started for this project with the same command, wherever it turned out to answer.
-3. Otherwise, weblab starts the `dev` script and waits for it to answer at the `PORT` in `.env`, or at a `localhost` address it prints as it starts. An address it prints that something else already serves (an API the app calls) is not taken for the app.
-
-The project is the nearest directory at or above `dir` with a `package.json`, looking no higher than the top of its git repository; in a monorepo that is the app's own folder. Its `dev` script runs with the package manager its lockfile names (`bun`, `pnpm`, `yarn` or `npm`), or the first of those installed.
+`start` without `address` is refused: weblab would have nowhere to wait for it.
 
 ### Which project
 
 A session given `dir` is in that project, and once it has opened, every session opened after it without one is too. Until a `dir` is given, the project is the folder weblab was started in: where its client (the agent's app) started, which isn't always where the agent works. An agent that moved into a worktree after starting still has weblab in the checkout it started in.
 
-So weblab won't take that folder as the project when its repository is checked out anywhere else as well (it has other git worktrees): the wrong checkout's server serves the wrong code, and its dev script may rewrite that checkout's `.env` or take its ports. The session is refused, naming the checkouts: `new: no dir was given, so the project is the folder weblab was started in, ~/code/shop. Its repository is checked out elsewhere too (~/code/shop-worktrees/fix-cart), so weblab won't guess that this is the one. Give dir: ...`. Giving `dir` once, even the same folder, settles it. A session that only attaches to a running browser, or points at an `address` where something already answers, isn't asked.
+So weblab won't take that folder as the project when its repository is checked out anywhere else as well (it has other git worktrees): `start` run in the wrong checkout serves the wrong code, and may change things there or take its ports. The session is refused, naming the checkouts: `new: no dir was given, so the project is the folder weblab was started in, ~/code/shop. Its repository is checked out elsewhere too (~/code/shop-worktrees/fix-cart), so weblab won't guess that this is the one. Give dir: ...`. Giving `dir` once, even the same folder, settles it. A session that doesn't give `start`, or points at an `address` where something already answers, isn't asked.
 
 ### When a server is started, shared and stopped
 
-- weblab starts a server only when nothing answers at the session's address.
+- weblab starts a server only when nothing answers at the session's address and the session gave `start`.
 - A server weblab started is shared by every session pointing at its address, in this weblab and in any other weblab process on the machine. A second session there joins it rather than starting another.
 - It stops when the last session using it ends. `end` says which happened: `stopped the server at ...`, or `left the server at ... running: another session is using it, and the last one stops it`.
 - A server weblab did not start is never stopped: `left the server at ... running, as weblab didn't start it`.
 - A server that puts itself in the background and exits (as `astro dev` does) is followed by the port it listens on, and stopped all the same.
 - When weblab exits (the client goes, or it is sent a signal), its sessions end and its servers are let go of the same way, and the browsers it launched are closed. If a weblab process is killed outright, a watcher weblab started alongside it stops the browsers it launched at once, and the servers it started that no live weblab is using. If the watcher was killed too, the next weblab to start does. A browser or app weblab only attached to, and a server weblab didn't start, are never stopped.
-- A server's output goes to `server-<host>-<port>.log` in the session's files directory (`server-<pid>-<n>.log` when the server chose its own address). When a server fails to start, the error names that log and quotes its last lines.
+- A server's output goes to `server-<host>-<port>.log` in the session's files directory. When a server fails to start, the error names that log and quotes its last lines.
 
 ### attach
 
@@ -94,7 +93,7 @@ So weblab won't take that folder as the project when its repository is checked o
 
 - The session drives the first tab that isn't one of the browser's own pages, the tab whose URL or title contains `tab`, or a new tab with `newTab`.
 - It stays where it is: with no `path`, nothing is navigated. A `goto` with a path is resolved against `address` if one is given, else against the page's current origin, an Electron app's own scheme (`myapp://`) included.
-- No server is started unless `address` or `start` is given.
+- No server is started unless `start` is given, with `address`.
 - `viewport` resizes the tab only when given.
 - If the browser or app quits or restarts, the next step on the session says it went away, and `list` marks the session `(gone: the app quit or restarted)`. The session then has to be ended and opened again.
 - When the session ends, weblab closes only the tabs it opened (its new tab, tabs its steps opened, and their popups) and lets go of the browser, which keeps running.

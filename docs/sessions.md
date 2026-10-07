@@ -13,13 +13,13 @@ Two sessions at the same address are two users of one app. Open them with the `n
 `new`
 
 ```json
-{ "path": "/room/1" }
+{ "address": 5173, "start": "pnpm vite --port 5173", "path": "/room/1" }
 ```
 
 `new`
 
 ```json
-{ "name": "guest", "path": "/room/1" }
+{ "name": "guest", "address": 5173, "path": "/room/1" }
 ```
 
 The second joins the server the first started. Then any step says which session it is for with `on`, and `run`'s `session` says which one the rest are for:
@@ -79,24 +79,24 @@ The session a step opens is an ordinary session: it stays open after the run, `l
 
 ## Copies of an app on several ports
 
-One project can run several copies of its app, each at its own address, each with its own sessions. Give each an `address` and the command that starts it; weblab runs the command with the port in `PORT`:
+One project can run several copies of its app, each at its own address, each with its own sessions. Give each an `address` and the command that starts it there:
 
 `new`
 
 ```json
-{ "name": "a", "address": 4101, "start": "node server.mjs" }
+{ "name": "a", "address": 4101, "start": "node server.mjs --port 4101" }
 ```
 
 `new`
 
 ```json
-{ "name": "b", "address": "localhost:4102", "start": "node server.mjs" }
+{ "name": "b", "address": "localhost:4102", "start": "node server.mjs --port 4102" }
 ```
 
 ```text
-session b  at http://localhost:4102 (server started by weblab: node server.mjs)
+session b  at http://localhost:4102 (server started by weblab: node server.mjs --port 4102)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:4102 (node server.mjs in ~/code/shop); it stops when the last session on it ends
+started the server at http://localhost:4102 (node server.mjs --port 4102 in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (412ms)
 url   http://localhost:4102/
 title Shop
@@ -128,7 +128,7 @@ ok    3 js on b (4ms)
 
 Ending `a` leaves the server at 4101 running for `c` (`left the server at http://localhost:4101 running: another session is using it, and the last one stops it`); ending `c` stops it. The copy at 4102 is untouched.
 
-A dev server that doesn't read `PORT` is told its port in `start`: `"start": "pnpm vite --port 4101"`. To run two worktrees side by side, give each session its worktree's `dir`; each gets its own server.
+weblab passes the command nothing, not even the port: `start` says where to listen, as `"pnpm vite --port 4101"` does. To run two worktrees side by side, give each session its worktree's `dir`; each gets its own server.
 
 Other weblab processes on the machine (another agent's, say) share servers the same way: a second weblab whose session points at an address where weblab started a server joins it, and the server stops when the last session in any of them ends.
 
@@ -155,12 +155,12 @@ An Electron app that doesn't take the switch can turn it on itself with `app.com
 
 An app started through its dev tooling needs the flags passed along. With Electron Forge, everything after `--` goes to the app: `electron-forge start -- --remote-debugging-port=9222 --inspect=9229`. Forge's own `--inspect-electron` flag always uses port 9229. An app's own launch script may need changing to pass the flags on.
 
-weblab can also start the app itself, and stop it when the session ends. Give the debugging port as `address` too, and the command as `start`. The command gets the port in `PORT`:
+weblab can also start the app itself, and stop it when the session ends. Give the debugging port as `address` too, and the command as `start`:
 
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=9222 --inspect=9229" }
 ```
 
 If an app started by hand exits at once with `Cannot find module 'electron'`, it ran as plain Node. The shell has `ELECTRON_RUN_AS_NODE` set, which happens in a terminal opened from another Electron app, such as an editor. Put `env -u ELECTRON_RUN_AS_NODE` in front of the command. Commands weblab starts never get the variable.
@@ -254,7 +254,7 @@ Each engine can be a session beside the others, so one set of steps can be run i
 `new`
 
 ```json
-{ "name": "webkit", "browser": "webkit" }
+{ "name": "webkit", "address": 5173, "browser": "webkit" }
 ```
 
 `run`
@@ -289,7 +289,7 @@ Sign in once, save the session's cookies and storage under a name with `saveStat
 `new`
 
 ```json
-{ "name": "ada", "state": "ada", "path": "/account" }
+{ "name": "ada", "address": 5173, "state": "ada", "path": "/account" }
 ```
 
 - Saved states are kept per project in weblab's own directory (`~/.local/state/weblab/auth/`), never in a repository or a files directory, since they hold live credentials.

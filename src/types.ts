@@ -59,6 +59,8 @@ export type Settings = {
 
 /** The project a session was opened from: where defaults come from, and where its server starts. */
 export type App = {
+  /** The directory the session was given (or defaulted to): where `start` runs. */
+  dir: string;
   /** Where its package.json sits, else the git toplevel, else the directory given. */
   root: string;
   /** The top of the git checkout it is in, if it is in one. */
@@ -167,7 +169,7 @@ export type ActionContext = {
 export type SessionOptions = {
   /** What steps say with `on`, and what its files are named after (default: main, then session2, session3, ...). */
   name?: string;
-  /** The project: where its dev script and env file are, and where relative paths are read from. */
+  /** The project: where `start` runs, and where relative paths are read from. */
   dir?: string;
   /** Where the app answers: a URL, host:port, or a port. */
   address?: string | number;

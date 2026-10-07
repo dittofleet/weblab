@@ -310,13 +310,13 @@ How a session is driven (its viewport, its context options, its browser) is set 
 `new`
 
 ```json
-{ "name": "phone", "viewport": "390x844@3", "context": { "isMobile": true, "hasTouch": true } }
+{ "name": "phone", "address": 5173, "viewport": "390x844@3", "context": { "isMobile": true, "hasTouch": true } }
 ```
 
 `new`
 
 ```json
-{ "name": "desktop" }
+{ "name": "desktop", "address": 5173 }
 ```
 
 `run`

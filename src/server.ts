@@ -1,16 +1,15 @@
 // The servers sessions point at. A server is its address: whatever
 // answers there is used as it is, and when nothing does, weblab starts
-// the command it was given (or the project's dev script) and waits for
-// the address to answer. A server weblab started is shared by every
+// the command it was given, if it was given one, and waits for the
+// address to answer. A server weblab started is shared by every
 // session pointing at it, in any weblab process, and stopped when the
 // last of them ends.
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, realpathSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, realpathSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { dependenciesMissing, devCommand, projectOrigin, SERVER_TIMEOUT_MS } from "./app.ts";
-import { SetupError, stripAnsi, tail } from "./errors.ts";
+import { SERVER_TIMEOUT_MS } from "./app.ts";
+import { SetupError, tail } from "./errors.ts";
 import { onTeardown } from "./lifecycle.ts";
 import { allListeners, cwdOf, groupMembers, groupOf, isProcess, killGroup, killProcess, listenersOn, membersOf, type Process, processOf, running, startedAtMs, startTime } from "./processes.ts";
 import { acquireLock, clearRecord, fileName, readRecord, recordNames, writeRecord } from "./state.ts";
@@ -30,10 +29,9 @@ type ServerState = {
   origin: string | null;
   /** What was run, where, and where its output went. */
   command: string;
-  root: string;
+  /** Where the command was run. */
+  dir: string;
   log: string;
-  /** True when nobody said where it would answer: the address is the one it printed. */
-  auto: boolean;
   /** The weblab processes with a session on it now. The last to leave stops it. */
   users: User[];
   /**
@@ -77,8 +75,8 @@ export function fateText(origin: string, fate: Fate): string | null {
 }
 
 type Options = {
-  /** Where it answers, as an origin, when the session said. */
-  address?: string;
+  /** Where it answers, as an origin. */
+  address: string;
   /** How to start it, when the session said. */
   command?: string;
   timeoutMs?: number;
@@ -158,10 +156,10 @@ function whoseServer(state: ServerState, origin: string, wentToBackground: boole
   if (listeners.length === 0 || listeners.some((pid) => groupOf(pid) === state.pgid)) return { ours: true };
   if (!wentToBackground) return { ours: false };
   const before = new Set(state.listeningBefore ?? []);
-  const root = realpathSync(state.root);
+  const dir = realpathSync(state.dir);
   const inProject = (pid: number) => {
     const cwd = cwdOf(pid);
-    return cwd !== null && (cwd === root || cwd.startsWith(`${root}/`));
+    return cwd !== null && (cwd === dir || cwd.startsWith(`${dir}/`));
   };
   const moved = listeners.find((pid) => !before.has(pid) && startedSince(pid, state.spawnedAt) && inProject(pid));
   const pgid = moved === undefined ? null : groupOf(moved);
@@ -181,34 +179,18 @@ export async function probe(origin: string, timeoutMs = 1500): Promise<boolean> 
 
 const DETACHED_PATIENCE_MS = 15_000;
 
-const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+/g;
-
-function urlsInLog(log: string): string[] {
-  try {
-    return [...new Set(stripAnsi(readFileSync(log, "utf8")).match(LOCAL_URL) ?? [])];
-  } catch {
-    return [];
-  }
-}
-
 // A server other sessions are using may be slow to answer while it builds.
 const SHARED_PATIENCE_MS = 15_000;
 
 const notOurs = (origin: string): Server => ({ origin, owned: false, started: false, stop: async () => "not-ours" });
 
 /**
- * The server a session points at, started if need be.
- * - At an address the session gave: whatever answers there is used,
- *   and if nothing does, the command is started and told the port
- *   (PORT in its environment).
- * - With no address given, the project's own: where its .env says
- *   (PORT), else wherever its dev script says it is listening. One
- *   weblab already started for the project is joined, else one is started.
+ * The server at the address a session gave. Whatever answers there is
+ * used; if nothing does, the command the session gave is started, as it
+ * is, in its dir. Nothing is guessed: with no command, nothing is started.
  */
-export async function ensureServer(app: App, options: Options): Promise<Server> {
-  const command = options.command ?? devCommand(app);
-  if (options.address !== undefined) return atAddress(app, options.address, command, options);
-  return ofProject(app, command, options);
+export function ensureServer(app: App, options: Options): Promise<Server> {
+  return atAddress(app, options.address, options.command ?? null, options);
 }
 
 type Held = { server: Server; count: number };
@@ -267,7 +249,7 @@ function atAddress(app: App, origin: string, command: string | null, options: Op
       // Someone else's, already there: used as it is.
       if (await probe(origin)) return notOurs(origin);
       if (command === null) {
-        throw new SetupError(`nothing answers at ${origin}, and ${app.root} has no dev script to start: give start, the command that starts it`);
+        throw new SetupError(`nothing answers at ${origin}: start the app there first, or give start, the command that starts it there`);
       }
       return await startServer(app, command, origin, options);
     } finally {
@@ -301,70 +283,23 @@ async function joinRecorded(name: string, log: (line: string) => void): Promise<
   return null;
 }
 
-async function ofProject(app: App, command: string | null, options: Options): Promise<Server> {
-  const starting = `start.${createHash("sha1").update(`${app.root}\n${command ?? ""}`).digest("hex").slice(0, 12)}`;
-  // One at a time for a project's command, so two sessions opened
-  // together share one server rather than starting two.
-  const release = await locked(starting, options.log);
-  onTeardown(release);
-  try {
-    // Where its .env says, if something is there: weblab's own, or someone else's.
-    const said = projectOrigin(app);
-    if (said !== null && (readState(recordName(said)) !== null || (await probe(said)))) {
-      const there = await atAddress(app, said, null, options).catch(() => null);
-      if (there !== null) return there;
-    }
-    // One weblab started for this project before, wherever it turned out to answer.
-    for (const name of recordNames("server.")) {
-      const state = readState(name);
-      if (state === null || !state.auto || state.root !== app.root || state.command !== command || state.origin === null || !serverIsOurs(state)) continue;
-      // Joined under its own lock, as any server is.
-      return await atAddress(app, state.origin, command, options);
-    }
-    if (command === null) {
-      throw new SetupError(
-        said === null
-          ? `no address is known for ${app.root}, and it has no dev script to start: give address (and start, if nothing is running there yet)`
-          : `nothing answers at ${said} (the PORT in ${app.root}/.env), and the project has no dev script to start: give start, the command that starts it`,
-      );
-    }
-    // Where its .env says it will answer is held while it starts, so a
-    // session asking for that address by name waits and then joins it.
-    const expected = said === null ? null : recordName(said);
-    const releaseExpected = expected === null ? null : await locked(expected, options.log);
-    if (releaseExpected !== null) onTeardown(releaseExpected);
-    try {
-      const started = await startServer(app, command, null, options, expected);
-      return await counted(recordName(started.origin), async () => started);
-    } finally {
-      releaseExpected?.();
-    }
-  } finally {
-    release();
-  }
-}
-
-let startCount = 0;
-
-// `holding` is the record whose lock the caller has: the one a server
-// at a known address is written under.
-async function startServer(app: App, command: string, wanted: string | null, options: Options, holding: string | null = wanted === null ? null : recordName(wanted)): Promise<Server> {
+// Called holding the lock of the record it is written under, its address's.
+async function startServer(app: App, command: string, wanted: string, options: Options): Promise<Server> {
   mkdirSync(options.logDir, { recursive: true });
-  const count = (startCount += 1);
-  const logFile = joinPath(options.logDir, `server-${fileName(wanted === null ? `${process.pid}-${count}` : new URL(wanted).host)}.log`);
+  const logFile = joinPath(options.logDir, `server-${fileName(new URL(wanted).host)}.log`);
   const out = openSync(logFile, "a");
   // Its own process group, so teardown reaches vite under the
   // package-manager wrapper, not just the wrapper.
   const listeningBefore = [...allListeners()];
   const spawnedAt = Date.now();
-  const port = wanted === null ? "" : new URL(wanted).port;
+  // Run as given, with weblab's own environment: where to listen is the
+  // command's to say, so nothing is added that whatever it starts would
+  // inherit (a PORT meant for one server would reach every one).
   const child = spawn(command, {
-    cwd: app.root,
+    cwd: app.dir,
     shell: true,
     detached: true,
     stdio: ["ignore", out, out],
-    // Told where to answer, the way most dev servers read it.
-    env: { ...process.env, ...(port === "" ? {} : { PORT: port }) },
   });
   closeSync(out);
   if (child.pid === undefined) throw new SetupError(`could not start: ${command}`);
@@ -383,14 +318,13 @@ async function startServer(app: App, command: string, wanted: string | null, opt
     listeningBefore,
     origin: null,
     command,
-    root: app.root,
+    dir: app.dir,
     log: logFile,
-    auto: wanted === null,
     users: [me()],
   };
   // Recorded from the start, so a weblab that dies while it waits
   // leaves something for the next one to clear away.
-  let name = wanted === null ? `server.starting-${process.pid}-${count}` : recordName(wanted);
+  const name = recordName(wanted);
   writeRecord(name, state);
   // Until the server answers and is handed to the session, an
   // interrupt has to stop it from here.
@@ -409,34 +343,18 @@ async function startServer(app: App, command: string, wanted: string | null, opt
   const timeoutMs = options.timeoutMs ?? SERVER_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    // A project's own server says where it answers as it starts: in its
-    // .env (the dev command may be what writes it), or in what it prints.
-    const said = wanted === null ? projectOrigin(app) : null;
-    for (const origin of wanted !== null ? [wanted] : [...(said === null ? [] : [said]), ...urlsInLog(logFile)]) {
-      if (!(await probe(origin))) continue;
-      // An address in the log may be another app's (an API it calls),
-      // already served by someone else: only weblab's own server counts.
-      const whose = whoseServer(state, origin, exitCode === 0);
-      if (!whose.ours) continue;
-      state.origin = origin;
+    // Only weblab's own server counts: something else that took the
+    // address meanwhile isn't what the command started.
+    const whose = (await probe(wanted)) ? whoseServer(state, wanted, exitCode === 0) : { ours: false as const };
+    if (whose.ours) {
+      state.origin = wanted;
       recordMembers(state);
       if (whose.detached !== undefined) {
         state.detached = whose.detached;
         options.log(`the server went into the background (pid ${whose.detached.pid}); weblab is keeping track of it`);
       }
-      // Recorded under its address, under that address's lock: a session
-      // joining or leaving there at this moment sees one or the other.
-      const starting = name;
-      const found = recordName(origin);
-      const release = found === holding ? null : await locked(found, options.log);
-      try {
-        name = found;
-        writeRecord(name, state);
-        if (starting !== name) clearRecord(starting);
-        handedOver = true;
-      } finally {
-        release?.();
-      }
+      writeRecord(name, state);
+      handedOver = true;
       return owned(name, state, true, options.log);
     }
     // A clean exit may be a server that went into the background, which
@@ -444,14 +362,12 @@ async function startServer(app: App, command: string, wanted: string | null, opt
     if (exitCode !== null && (exitCode !== 0 || Date.now() - exitedAt > DETACHED_PATIENCE_MS)) {
       // The wrapper is gone, but something it started may not be.
       await giveUp();
-      const why = dependenciesMissing(app) ? ` (${app.root} has no node_modules: install its dependencies first)` : "";
-      throw new SetupError(`the server exited with code ${exitCode} before answering${exitCode === 0 ? ` (and nothing answered for ${DETACHED_PATIENCE_MS / 1000} s after)` : ""}${why}; see ${logFile}${tail(logFile)}`);
+      throw new SetupError(`the server exited with code ${exitCode} before answering${exitCode === 0 ? ` (and nothing answered for ${DETACHED_PATIENCE_MS / 1000} s after)` : ""}; see ${logFile}${tail(logFile)}`);
     }
     await sleep(250);
   }
   await giveUp();
-  const where = wanted === null ? "at the PORT in its .env, or at any address its output printed" : `at ${wanted} (it was started with PORT=${port}; if it takes its port another way, say so in start)`;
-  throw new SetupError(`the server did not answer ${where} within ${timeoutMs} ms; see ${logFile}${tail(logFile)}`);
+  throw new SetupError(`nothing answered at ${wanted} within ${timeoutMs} ms of running start (it has to make the app listen there); see ${logFile}${tail(logFile)}`);
 }
 
 // The same server as a record names: not one started since in its place.

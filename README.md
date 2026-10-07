@@ -29,7 +29,7 @@ In a client's JSON config, the server entry is `{ "command": "weblab" }`. Sessio
 
 | Tool | What it does |
 | --- | --- |
-| `new` | Opens a session: a browser of its own, with a name, pointing at an address. Starts the app's dev server if nothing answers there. |
+| `new` | Opens a session: a browser of its own, with a name, pointing at an address. Runs the `start` command it is given if nothing answers there. |
 | `run` | Runs steps on a session, in order, stopping at the first that fails. Replies with each step's outcome, what it handed back, and its screenshots. |
 | `end` | Ends one session, or all of them. Writes a video still recording and traces, and stops a server nobody else is using. |
 | `list` | The sessions that are open, where each one is, and whether steps are running on it. |
@@ -40,13 +40,13 @@ In a client's JSON config, the server entry is `{ "command": "weblab" }`. Sessio
 `new`
 
 ```json
-{ "path": "/settings" }
+{ "address": 5173, "start": "pnpm vite --port 5173", "path": "/settings" }
 ```
 
 ```text
-session main  at http://localhost:5173 (server started by weblab: pnpm run dev)
+session main  at http://localhost:5173 (server started by weblab: pnpm vite --port 5173)
 files $TMPDIR/weblab/shop-20261003-101600
-started the server at http://localhost:5173 (pnpm run dev in ~/code/shop); it stops when the last session on it ends
+started the server at http://localhost:5173 (pnpm vite --port 5173 in ~/code/shop); it stops when the last session on it ends
 ok    1 goto (1840ms)
 url   http://localhost:5173/settings
 title Settings
@@ -83,7 +83,7 @@ The screenshot also comes back as an image in the same reply. A step that fails 
 
 ## What it can do
 
-- Start the app's dev server when nothing answers at its address, share it among every session pointing there, and stop it when the last one ends. A server it didn't start is used as it is and left running.
+- Start the app with the command it is given when nothing answers at its address, share it among every session pointing there, and stop it when the last one ends. A server it didn't start is used as it is and left running. It never guesses how a project is run.
 - Run any number of sessions at once: two users, copies of an app on several ports, Chrome, Edge, WebKit and Firefox side by side.
 - Join a browser or Electron app that is already running, and leave it as it was found. Run code in an Electron app's main process too.
 - Read the page as an accessibility tree with refs to act on, as text, or as HTML.
