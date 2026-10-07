@@ -1,1 +1,1 @@
-{ "private": true, "type": "module", "scripts": { "dev": "node server.mjs" }, "devDependencies": { "react": "^19.0.0" } }
+{ "private": true, "type": "module", "devDependencies": { "react": "^19.0.0" } }

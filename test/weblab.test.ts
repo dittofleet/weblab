@@ -25,11 +25,23 @@ const scratch = mkdtempSync(join(tmpdir(), "weblab-test-"));
 const temp = join(scratch, "tmp");
 mkdirSync(temp);
 const VERSION = "2026-07-28";
-// What every session here is opened with. The fixture's folder is named,
-// as this repository may have other worktrees, where weblab won't start
-// a server in the folder it was started in without being told.
+const freePort = () =>
+  new Promise<number>((done) => {
+    const probe = createServer();
+    probe.listen(0, "localhost", () => {
+      const { port } = probe.address() as { port: number };
+      probe.close(() => done(port));
+    });
+  });
+
+// What every session here is opened with: the fixture's address, and
+// the command that starts it there. The fixture's folder is named, as
+// this repository may have other worktrees, where weblab won't start a
+// server in the folder it was started in without being told.
 const LOOKS = { viewport: "800x600@1", ignore: ["favicon"] };
-const BASE = { ...LOOKS, dir: app };
+const PORT = await freePort();
+const START = `node server.mjs --port ${PORT}`;
+const BASE = { ...LOOKS, dir: app, address: PORT, start: START };
 
 // These start servers and Chrome, which a busy machine makes slow.
 function test(name: string, body: () => void | Promise<void>): void;
@@ -117,7 +129,6 @@ function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
 after(async () => {
   await Promise.all(all.map((one) => one.close()));
   rmSync(scratch, { recursive: true, force: true });
-  rmSync(join(app, ".env"), { force: true });
 });
 
 const answers = async (origin: string) => {
@@ -128,15 +139,6 @@ const answers = async (origin: string) => {
     return false;
   }
 };
-
-const freePort = () =>
-  new Promise<number>((done) => {
-    const probe = createServer();
-    probe.listen(0, "localhost", () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => done(port));
-    });
-  });
 
 // ---- the processes weblab starts
 
@@ -226,20 +228,21 @@ test("it speaks the 2026-07-28 format, and still answers a client that opens wit
   await legacy.close();
 });
 
-test("new starts the project's server, run drives the page and shows it, end stops the server", async () => {
+test("new runs start when nothing answers, run drives the page and shows it, end stops the server", async () => {
   const lab = weblab();
   const dir = out();
   const opened = await lab.tool("new", { ...BASE, out: dir });
   assert.equal(opened.failed, false, opened.text);
-  assert.match(opened.text, /^session main {2}at http:\/\/localhost:\d+ \(server started by weblab: bun run dev\)/);
-  assert.match(opened.text, new RegExp(`started the server at ${originIn(opened.text)} \\(bun run dev in ${app}\\)`));
+  assert.match(opened.text, new RegExp(`^session main {2}at http://localhost:${PORT} \\(server started by weblab: ${START}\\)`));
+  assert.match(opened.text, new RegExp(`started the server at http://localhost:${PORT} \\(${START} in ${app}\\)`));
   assert.match(opened.text, /ok {4}1 goto/);
   assert.match(opened.text, /title fixture/);
   assert.match(opened.text, /console since the last reply:\n {2}\[console\.log\] fixture mounted/);
   const origin = originIn(opened.text);
   assert.equal(await answers(origin), true);
-  // Only the port is ever taken from the env file.
-  assert.ok(!opened.text.includes("do-not-print"));
+  // The command is run as it is: nothing is added to its environment
+  // that every server it starts would inherit.
+  assert.deepEqual(await (await fetch(`${origin}/env`)).json(), { PORT: null });
 
   const ran = await lab.tool("run", { steps: [{ click: "#inc" }, { js: "document.querySelector('#inc').textContent" }, { look: { selector: "h1" } }, { shot: "home" }] });
   assert.equal(ran.failed, false, ran.text);
@@ -271,7 +274,7 @@ test("new starts the project's server, run drives the page and shows it, end sto
   assert.match(stale.text, /is from a look at .*, and the page has changed since: run a look step/);
 
   const listed = await lab.tool("list");
-  assert.match(listed.text, /^main {2}at http:\/\/localhost:\d+ \(server started by weblab: bun run dev\)\n {2}url {3}http.*\/other/);
+  assert.match(listed.text, new RegExp(`^main {2}at ${origin} \\(server started by weblab: ${START}\\)\n {2}url {3}http.*/other`));
 
   const ended = await lab.tool("end", { session: "main" });
   assert.match(ended.text, new RegExp(`ended main\nstopped the server at ${origin}`));
@@ -301,7 +304,7 @@ test("every kind of step and target works from a file, and a saved sign-in carri
   assert.match((await lab.tool("end", { session: "ada" })).text, /trace .*traces\/ada\.zip/);
   assert.ok(existsSync(join(dir, "traces", "ada.zip")));
 
-  const nobody = await lab.tool("new", { name: "x", state: "nobody" });
+  const nobody = await lab.tool("new", { ...BASE, name: "x", state: "nobody" });
   assert.equal(nobody.isError, true);
   assert.match(nobody.text, /no saved state named "nobody"/);
 
@@ -410,13 +413,13 @@ test("two sessions are two users: a step opens the second, and steps say which t
 test("one worktree runs copies of its app side by side, each at its own address", async () => {
   const lab = weblab();
   const [first, second] = [await freePort(), await freePort()];
-  const a = await lab.tool("new", { ...BASE, name: "a", address: first, start: "node server.mjs" });
+  const a = await lab.tool("new", { ...BASE, name: "a", address: first, start: `node server.mjs --port ${first}` });
   assert.equal(a.failed, false, a.text);
-  assert.match(a.text, new RegExp(`^session a {2}at http://localhost:${first} \\(server started by weblab: node server\\.mjs\\)`));
-  const b = await lab.tool("new", { ...BASE, name: "b", address: `localhost:${second}`, start: "node server.mjs" });
+  assert.match(a.text, new RegExp(`^session a {2}at http://localhost:${first} \\(server started by weblab: node server\\.mjs --port ${first}\\)`));
+  const b = await lab.tool("new", { ...BASE, name: "b", address: `localhost:${second}`, start: `node server.mjs --port ${second}` });
   assert.match(b.text, new RegExp(`^session b {2}at http://localhost:${second} `));
   // A third session at the first address joins that server.
-  const c = await lab.tool("new", { ...BASE, name: "c", address: `http://localhost:${first}` });
+  const c = await lab.tool("new", { ...LOOKS, dir: app, name: "c", address: `http://localhost:${first}` });
   assert.doesNotMatch(c.text, /started the server/);
 
   const ran = await lab.tool("run", { session: "a", steps: [{ click: "#inc" }, { js: "location.port" }, { js: "location.port", on: "b" }, { js: "document.querySelector('#inc').textContent", on: "b" }] });
@@ -433,12 +436,12 @@ test("one worktree runs copies of its app side by side, each at its own address"
 
 test("a server someone else started is used as it is, and left running", async () => {
   const port = await freePort();
-  const theirs = spawn("node", ["server.mjs"], { cwd: app, env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
+  const theirs = spawn("node", ["server.mjs", "--port", String(port)], { cwd: app, stdio: "ignore" });
   try {
     const origin = `http://localhost:${port}`;
     for (const deadline = Date.now() + 10_000; !(await answers(origin)) && Date.now() < deadline; ) await sleep(100);
     const lab = weblab();
-    const opened = await lab.tool("new", { ...BASE, address: port });
+    const opened = await lab.tool("new", { ...LOOKS, dir: app, address: port });
     assert.equal(opened.failed, false, opened.text);
     assert.match(opened.text, new RegExp(`^session main {2}at ${origin}\\n`));
     assert.match((await lab.tool("end")).text, new RegExp(`left the server at ${origin} running, as weblab didn't start it`));
@@ -450,8 +453,10 @@ test("a server someone else started is used as it is, and left running", async (
     const nothing = weblab();
     const refused = await nothing.tool("new", { address: empty, dir: scratch });
     assert.equal(refused.isError, true);
-    assert.match(refused.text, new RegExp(`nothing answers at http://localhost:${empty}, and .* has no dev script to start: give start`));
-    assert.match((await nothing.tool("new", { dir: scratch })).text, /no address is known for .*, and it has no dev script to start: give address/);
+    assert.match(refused.text, new RegExp(`nothing answers at http://localhost:${empty}: start the app there first, or give start, the command that starts it there`));
+    // Where the app is, and how it starts, aren't guessed either.
+    assert.match((await nothing.tool("new", { dir: scratch })).text, /new: give address, where the app answers/);
+    assert.match((await nothing.tool("new", { start: "node server.mjs", dir: scratch })).text, /new: start needs address/);
     assert.match((await nothing.tool("new", { address: "not a place" })).text, /address: "not a place" isn't a URL, host:port, or a port/);
     // A command that fails says so, with what it printed.
     const crashed = await nothing.tool("new", { address: empty, start: "echo no such app; exit 3", dir: scratch });
@@ -463,41 +468,43 @@ test("a server someone else started is used as it is, and left running", async (
 });
 
 test("weblab won't start a server in the folder it was started in when the repository is checked out elsewhere too", async () => {
-  // A repository of its own, with the fixture's server as its dev script.
+  // A repository of its own, with the fixture's server in it.
   const repo = join(scratch, "checkouts", "shop");
   const other = join(scratch, "checkouts", "shop-other");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
   mkdirSync(repo, { recursive: true });
-  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "shop", scripts: { dev: "node server.mjs" } }));
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "shop" }));
   writeFileSync(join(repo, "server.mjs"), readFileSync(join(app, "server.mjs")));
+  const port = await freePort();
+  const SHOP = { ...LOOKS, address: port, start: `node server.mjs --port ${port}` };
   git("init", "-q");
   git("add", ".");
   git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "shop");
 
   // With the one checkout, the folder weblab was started in is the project.
   const alone = weblab({}, repo);
-  const first = await alone.tool("new", LOOKS);
+  const first = await alone.tool("new", SHOP);
   assert.equal(first.failed, false, first.text);
   await alone.close();
 
   git("worktree", "add", "-q", other);
   const lab = weblab({}, repo);
-  const refused = await lab.tool("new", LOOKS);
+  const refused = await lab.tool("new", SHOP);
   assert.equal(refused.isError, true);
   assert.match(refused.text, new RegExp(`no dir was given, so the project is the folder weblab was started in, .*shop\. Its repository is checked out elsewhere too \\(.*shop-other\\), so weblab won't guess that this is the one`));
   // Given once, the dir is the default after.
-  const there = await lab.tool("new", { ...LOOKS, dir: other });
+  const there = await lab.tool("new", { ...SHOP, dir: other });
   assert.equal(there.failed, false, there.text);
-  assert.match(there.text, /started the server at .* \(\S+ run dev in .*shop-other\)/);
+  assert.match(there.text, /started the server at .* \(node server\.mjs --port \d+ in .*shop-other\)/);
   // What already answers at an address given is used, whichever checkout weblab is in.
   const visitor = weblab({}, repo);
   const joined = await visitor.tool("new", { ...LOOKS, address: originIn(there.text) });
   assert.equal(joined.failed, false, joined.text);
   await visitor.close();
   await lab.tool("end");
-  const again = await lab.tool("new", LOOKS);
+  const again = await lab.tool("new", SHOP);
   assert.equal(again.failed, false, again.text);
-  assert.match(again.text, /run dev in .*shop-other\)/);
+  assert.match(again.text, /--port \d+ in .*shop-other\)/);
   await lab.close();
 });
 
@@ -610,8 +617,7 @@ test("a session ending, the client going, and a signal each leave no browser run
 
 test("sessions opened at the same moment share one server, and leaving mid-open leaves nothing behind", async () => {
   const lab = weblab();
-  // With no address, and by the address its .env names: one server either way.
-  rmSync(join(app, ".env"), { force: true });
+  // Opened together at one address: one server.
   const [a, b, c] = await Promise.all([lab.tool("new", { ...BASE, name: "a" }), lab.tool("new", { ...BASE, name: "b" }), lab.tool("new", { ...BASE, name: "c", path: "/other" })]);
   for (const opened of [a, b, c]) assert.equal(opened.failed, false, opened.text);
   const origin = originIn(a.text);
@@ -634,8 +640,7 @@ test("sessions opened at the same moment share one server, and leaving mid-open 
   void hasty.rpc("tools/call", { name: "new", arguments: { ...BASE } });
   await sleep(700);
   await hasty.close();
-  const port = /^PORT=(\d+)$/m.exec(readFileSync(join(app, ".env"), "utf8"))?.[1];
-  assert.equal(await answers(`http://localhost:${port}`), false);
+  assert.equal(await answers(`http://localhost:${PORT}`), false);
 });
 
 test("a run that outlasts the call is left running, and the next call tells the rest", async () => {
@@ -1122,11 +1127,11 @@ test("the same steps run in WebKit and Firefox, each as a session beside the oth
     assert.match(ran.text, new RegExp(engine));
     assert.match((await lab.tool("run", { session: browser, steps: [{ cdp: "Browser.getVersion" }] })).text, new RegExp(`cdp is the Chrome DevTools Protocol, which ${browser} doesn't speak`));
   }
-  assert.match((await lab.tool("new", { name: "x", browser: "nonesuch" })).text, /no browser called "nonesuch" found/);
+  assert.match((await lab.tool("new", { ...BASE, name: "x", browser: "nonesuch" })).text, /no browser called "nonesuch" found/);
   await lab.close();
 });
 
-test("a server that puts itself in the background is still stopped, and an address it only mentions is not taken for it", async () => {
+test("a server that puts itself in the background is still stopped", async () => {
   const detached = weblab({ WEBLAB_TEST_DETACH: "1" });
   const opened = await detached.tool("new", { ...BASE });
   assert.equal(opened.failed, false, opened.text);
@@ -1134,22 +1139,6 @@ test("a server that puts itself in the background is still stopped, and an addre
   const origin = originIn(opened.text);
   await detached.close();
   assert.equal(await answers(origin), false);
-
-  // Someone else's server, whose address the app prints as it starts.
-  const port = await freePort();
-  const theirs = spawn("node", ["server.mjs"], { cwd: app, env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
-  try {
-    for (const deadline = Date.now() + 10_000; !(await answers(`http://localhost:${port}`)) && Date.now() < deadline; ) await sleep(100);
-    rmSync(join(app, ".env"), { force: true });
-    const lab = weblab({ WEBLAB_TEST_MENTION: `http://localhost:${port}`, WEBLAB_TEST_DELAY: "600" });
-    const mine = await lab.tool("new", { ...BASE });
-    assert.equal(mine.failed, false, mine.text);
-    assert.notEqual(originIn(mine.text), `http://localhost:${port}`);
-    await lab.close();
-    assert.equal(await answers(`http://localhost:${port}`), true);
-  } finally {
-    theirs.kill();
-  }
 });
 
 // Last: whatever any test above started has gone, killed weblabs' too.

@@ -229,7 +229,7 @@ function inherited(parent: Driver): SessionOptions {
   return {
     ...rest,
     ...(context === undefined ? {} : { context: Object.fromEntries(Object.entries(context).filter(([key]) => !IDENTITY.includes(key))) }),
-    dir: parent.app.root,
+    dir: parent.app.dir,
     out: parent.dir,
     // Where the parent is pointed: its server, or the site an attached browser is on.
     ...(parent.address !== null ? { address: parent.address } : /^https?:/.test(parent.ctx.origin) ? { address: parent.ctx.origin } : {}),
@@ -260,14 +260,14 @@ function checked(options: SessionOptions): SessionOptions {
 }
 
 // The folder weblab happened to be started in, when the same repository
-// is checked out elsewhere too, may well be the wrong checkout: its
-// server serves the wrong code, and its dev script may change things
-// there. Asked for rather than guessed.
+// is checked out elsewhere too, may well be the wrong checkout: a start
+// run there serves the wrong code, and may change things there. Asked
+// for rather than guessed.
 function checkUnchosen(app: App): void {
   const others = otherCheckouts(app);
   if (others.length === 0) return;
   throw new UsageError(
-    `new: no dir was given, so the project is the folder weblab was started in, ${app.root}. Its repository is checked out elsewhere too (${others.join(", ")}), so weblab won't guess that this is the one. Give dir: the checkout you are working in (${app.root} for this one). Later sessions default to the dir given.`,
+    `new: no dir was given, so the project is the folder weblab was started in, ${app.dir}. Its repository is checked out elsewhere too (${others.join(", ")}), so weblab won't guess that this is the one. Give dir: the checkout you are working in (${app.dir} for this one). Later sessions default to the dir given.`,
   );
 }
 
@@ -299,7 +299,7 @@ async function opening_(given: SessionOptions, parent?: Driver): Promise<Session
   opening.add(name);
   try {
     // A browser weblab joins is as it is: it takes nothing from the parent but where files go.
-    const base = parent === undefined ? {} : given.attach !== undefined ? { dir: parent.app.root, out: parent.dir } : inherited(parent);
+    const base = parent === undefined ? {} : given.attach !== undefined ? { dir: parent.app.dir, out: parent.dir } : inherited(parent);
     const session = await openNamed(name, { ...base, ...given, context: given.attach !== undefined ? undefined : { ...base.context, ...given.context }, name });
     // A dir the client gave, once a session has opened in it, is where its later ones are.
     if (parent === undefined && given.dir !== undefined) givenDir = resolve(given.dir);
@@ -329,13 +329,17 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
     ...(options.persist ? { persist: true } : {}),
     ...(options.init === undefined ? {} : { init: [options.init].flat() }),
   };
+  // Where it answers, always said: weblab doesn't guess where a
+  // project's app is, or how it is run. A browser that is joined is
+  // already somewhere, so it needs one only to start something.
+  if (options.address === undefined && options.start !== undefined) throw new UsageError("new: start needs address, where what it starts will answer");
+  if (options.address === undefined && settings.attach === undefined) {
+    throw new UsageError("new: give address, where the app answers: a URL, host:port, or a port. If nothing answers there yet, give start too, the command that starts it there");
+  }
   const app = resolveApp(options.dir ?? defaultDir(), settings);
-  // Where it answers. A browser that is joined is already somewhere,
-  // so a server is only this session's business when it names one.
   const address = options.address === undefined ? null : originOf(options.address);
-  const served = settings.attach === undefined || address !== null || options.start !== undefined;
-  // What already answers at an address given is used as it is, whichever checkout this is.
-  if (served && options.dir === undefined && givenDir === undefined && !(address !== null && (await probe(address)))) checkUnchosen(app);
+  // Only start runs anything in the project, so only then does it matter which checkout this is.
+  if (address !== null && options.start !== undefined && options.dir === undefined && givenDir === undefined && !(await probe(address))) checkUnchosen(app);
   const dir = options.out !== undefined ? artifactsDir(app.label, options.out) : (sharedDir ??= artifactsDir(app.label, undefined));
 
   const times = (opened.get(name) ?? 0) + 1;
@@ -362,10 +366,10 @@ async function openNamed(name: string, options: SessionOptions): Promise<Driver>
   try {
     let server: Server | null = null;
     let left: string | undefined;
-    if (served) {
-      server = await ensureServer(app, { address: address ?? undefined, command: options.start, timeoutMs: options.startTimeout, logDir: dir, log: say });
+    if (address !== null) {
+      server = await ensureServer(app, { address, command: options.start, timeoutMs: options.startTimeout, logDir: dir, log: say });
       const using = server;
-      if (using.started) say(`started the server at ${using.origin} (${using.command} in ${app.root}); it stops when the last session on it ends`);
+      if (using.started) say(`started the server at ${using.origin} (${using.command} in ${app.dir}); it stops when the last session on it ends`);
       // Let go of when the session ends; stopped if nothing else is using it.
       undo.push(async () => {
         left = fateText(using.origin, await using.stop()) ?? undefined;

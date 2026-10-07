@@ -227,10 +227,10 @@ const viewport = z.union([
 
 const sessionOptions = z.object({
   name: z.string().optional().describe(`What to call it: what run, end and a step's "on" say. Default: "main", then session2, session3, ...`),
-  address: z.union([z.string(), z.number()]).optional().describe("Where the app answers: a URL (a path on it is where the session goes first), host:port, or a port. Default: the project's dev server (the PORT in its .env, else wherever its dev script says it is listening). Whatever already answers at the address is used as it is."),
-  start: z.string().optional().describe("The command that starts the app, run in the project's root (the nearest package.json at or above dir) when nothing answers at the address. It gets the address's port as PORT. Default: the project's dev script. A server weblab starts is shared by every session at its address and stopped when the last of them ends."),
+  address: z.union([z.string(), z.number()]).optional().describe("Where the app answers: a URL (a path on it is where the session goes first), host:port, or a port. Required, except with attach. Whatever already answers at the address is used as it is."),
+  start: z.string().optional().describe("The command that starts the app, run as it is in dir when nothing answers at the address. It has to make the app listen at the address itself (\"pnpm vite --port 4101\"): weblab passes it nothing. Without it, nothing is started. A server weblab starts is shared by every session at its address and stopped when the last of them ends."),
   startTimeout: z.number().optional().describe("How long a server weblab starts gets to answer, in milliseconds (default: 60000)."),
-  dir: z.string().optional().describe("The project directory: where its dev script and .env are, and where relative paths in steps are read from. Default: the dir the last session opened with, else where weblab was started (where its client started, not where a shell has moved since: working in a worktree, give its path). weblab won't use the folder it was started in when its repository is checked out elsewhere too."),
+  dir: z.string().optional().describe("The project directory: where start runs, and where relative paths in steps are read from. Default: the dir the last session opened with, else where weblab was started (where its client started, not where a shell has moved since: working in a worktree, give its path). weblab won't use the folder it was started in when its repository is checked out elsewhere too."),
   path: z.string().optional().describe(`Where to go first: a path or URL. Default: "/", or with attach, wherever the browser already is.`),
   attach: z.union([z.string(), z.number()]).optional().describe("Join a browser or Electron app that is already running, by its remote debugging port or address, instead of launching one. It is left as it was found."),
   tab: z.string().optional().describe("With attach: which tab to drive, by part of its URL or title (default: the first)."),
@@ -279,11 +279,11 @@ const INSTRUCTIONS = `weblab drives real browsers for testing and exploring web 
 
 A session is a browser of its own (its cookies, its tabs) pointing at an address, with a name. Open one with new, run steps on it with run, end it with end. Any number can be open at once: two users are two sessions, and so are two copies of an app on two ports, or two windows of a running Electron app (attach).
 
-Only addresses can conflict. Whatever answers at a session's address is used as it is; if nothing does, weblab starts the project's dev script (or the start command given) there, shares that server among the sessions pointing at it, and stops it when the last of them ends.
+Only addresses can conflict. Every session says its address. Whatever answers there is used as it is; if nothing does and the session gave start, weblab runs that command as it is, waits for the address to answer, shares that server among the sessions pointing at it, and stops it when the last of them ends. weblab doesn't guess how a project is run: without start, nothing is started.
 
 The docs tool has the full reference (also offered as resources, weblab://docs/<page>): every argument, every step's options, and recipes for common tasks. It reads a whole page, or one section: { "section": "shot" } is one step's forms and options.
 
-When you work in a checkout other than the one your client started in (a worktree), give new its dir: a server is started there, and later sessions default to it.
+When you work in a checkout other than the one your client started in (a worktree), give new its dir: start runs there, and later sessions default to it.
 
 To see a page, run { "look": true } (its accessibility tree, with refs to act on; { "look": { "role": "dialog" } } reads one part of it, and depth keeps only the top levels) or { "shot": "name" } (a screenshot). In a React app, { "react": "tree" } shows its components and { "react": { "inspect": ... } } one of them, with its file and line. To do anything the built-in steps don't, run a js, playwright or cdp step; an electron step runs code in an attached Electron app's main process (new's mainProcess). Sessions end when this weblab exits; nothing is written into the project.`;
 
@@ -295,7 +295,7 @@ export function createServer(version: string): McpServer {
     {
       title: "New session",
       description:
-        "Open a session: a browser of its own pointing at an address, with a name. With no arguments: a session named main at the project's dev server, started if it isn't running. The reply says where it is and shows what the first page logged.",
+        "Open a session: a browser of its own pointing at an address, with a name. It needs address (unless it attaches to a running browser), and start to run something there when nothing answers yet. The reply says where it is and shows what the first page logged.",
       inputSchema: sessionOptions,
     },
     (options) =>

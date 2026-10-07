@@ -1,6 +1,6 @@
 # Recipes
 
-Short answers to common tasks, each shown as the arguments to pass to `run` (and to `new` where it matters). They assume a session is open; `new` with no arguments opens one named `main` at the project's dev server. Files written for a task can live anywhere; `/tmp` keeps them out of the repository.
+Short answers to common tasks, each shown as the arguments to pass to `run` (and to `new` where it matters). They assume a session is open; `new` with an `address` (`{ "address": 5173 }`) opens one named `main` there. Files written for a task can live anywhere; `/tmp` keeps them out of the repository.
 
 Many recipes use the [code steps](code.md). That is deliberate: when no named step fits, code is the direct route, not a last resort.
 
@@ -27,7 +27,7 @@ Many recipes use the [code steps](code.md). That is deliberate: when no named st
 - [Record a demo video](#record-a-demo-video)
 - [Upload and download files](#upload-and-download-files)
 - [Popups and new tabs](#popups-and-new-tabs)
-- [Use a server you started yourself](#use-a-server-you-started-yourself)
+- [Use a running server, or have weblab start one](#use-a-running-server-or-have-weblab-start-one)
 - [Drive an Electron app](#drive-an-electron-app)
 - [Get past an Electron app's native dialogs, offline](#get-past-an-electron-apps-native-dialogs-offline)
 - [Test two users or two devices at once](#test-two-users-or-two-devices-at-once)
@@ -210,13 +210,13 @@ Everything else is set when a session opens. Open one per setup, beside the firs
 `new`
 
 ```json
-{ "name": "phone", "viewport": "390x844@3", "context": { "isMobile": true, "hasTouch": true } }
+{ "name": "phone", "address": 5173, "viewport": "390x844@3", "context": { "isMobile": true, "hasTouch": true } }
 ```
 
 `new`
 
 ```json
-{ "name": "german", "context": { "locale": "de-DE", "timezoneId": "Europe/Berlin", "colorScheme": "dark" } }
+{ "name": "german", "address": 5173, "context": { "locale": "de-DE", "timezoneId": "Europe/Berlin", "colorScheme": "dark" } }
 ```
 
 `context` takes any of Playwright's [browser context options](https://playwright.dev/docs/api/class-browser#browser-new-context). Reduced motion is code: `{ "playwright": "await page.emulateMedia({ reducedMotion: 'reduce' })" }`.
@@ -245,7 +245,7 @@ Then open any later session from it:
 `new`
 
 ```json
-{ "name": "ada", "state": "ada", "path": "/account" }
+{ "name": "ada", "address": 5173, "state": "ada", "path": "/account" }
 ```
 
 [Sessions](sessions.md#saved-sign-ins) covers the other ways: keeping a whole profile with `persist`, or attaching to a browser that is already signed in.
@@ -318,6 +318,7 @@ Chromium can stand in a fake device, and play a file as the microphone. Give it 
 ```json
 {
   "name": "mic",
+  "address": 5173,
   "browserArgs": ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--use-file-for-fake-audio-capture=/tmp/speech.wav"]
 }
 ```
@@ -422,7 +423,7 @@ An open `<select>`, a context menu and a date picker are drawn by the operating 
 `new`
 
 ```json
-{ "name": "screen", "headed": true, "viewport": "1200x800", "path": "/settings" }
+{ "name": "screen", "address": 5173, "headed": true, "viewport": "1200x800", "path": "/settings" }
 ```
 
 `run`
@@ -504,7 +505,7 @@ Open a session at the size the video should be, set up whatever comes before the
 `new`
 
 ```json
-{ "name": "demo", "viewport": "1280x800@2" }
+{ "name": "demo", "address": 5173, "viewport": "1280x800@2" }
 ```
 
 `run`
@@ -556,7 +557,7 @@ Downloads are code. Save the file into the session's files directory, and `ctx.a
 
 `"new"` waits for a tab the steps haven't been on yet. The reply lists the tabs while there is more than one.
 
-## Use a server you started yourself
+## Use a running server, or have weblab start one
 
 If the app is already running, give its address; weblab uses it as it is and leaves it running:
 
@@ -566,7 +567,7 @@ If the app is already running, give its address; weblab uses it as it is and lea
 { "address": 3000 }
 ```
 
-To have weblab start it some other way than the `dev` script, give the command, the address it answers at, and, if need be, what ready means and how long it may take:
+To have weblab start it, give the command as well, written to make the app listen at that address, and, if need be, what ready means and how long it may take. weblab runs it as it is and passes it nothing:
 
 `new`
 
@@ -574,7 +575,7 @@ To have weblab start it some other way than the `dev` script, give the command, 
 { "address": 4173, "start": "pnpm preview --port 4173", "ready": { "selector": "#root > *" }, "startTimeout": 120000 }
 ```
 
-[Tools](tools.md#how-an-address-is-resolved) has the details.
+[Tools](tools.md#where-the-app-is-and-how-it-starts) has the details.
 
 ## Drive an Electron app
 
@@ -605,7 +606,7 @@ In a React app, `{ "reload": true }` once after attaching lets the `react` step 
 An app's renderer can also run in a plain browser session, when its dev server serves it, with a stub of what the app's preload puts on `window`. Record what the real API answers (attached, with `js` steps), write the stub to a file, and give it as `init`:
 
 ```json
-{ "name": "renderer", "address": 5173, "start": "pnpm exec vite --config vite.renderer.config.ts --port $PORT", "init": "/tmp/preload-stub.js" }
+{ "name": "renderer", "address": 5173, "start": "pnpm exec vite --config vite.renderer.config.ts --port 5173", "init": "/tmp/preload-stub.js" }
 ```
 
 ## Get past an Electron app's native dialogs, offline
@@ -615,7 +616,7 @@ No step can click a native file picker or message box, and a flow that downloads
 `new`
 
 ```json
-{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=$PORT --inspect=9229" }
+{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=9222 --inspect=9229" }
 ```
 
 `run`
