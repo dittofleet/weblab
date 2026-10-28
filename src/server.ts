@@ -99,10 +99,11 @@ const locked = (name: string, log: (line: string) => void) =>
   acquireLock(name, { busy: () => null, waiting: (holder) => log(`waiting for another weblab (pid ${holder}) that is starting this server`) });
 
 // A process that started after weblab spawned the server.
-// Start times are kept to the second, so "after" is the spawn's second or later.
+// Start times are kept to the second, and Linux's can read a second
+// early, so "after" is the second before the spawn's or later.
 const startedSince = (pid: number, spawnedAt: number | undefined) => {
   const started = startedAtMs(pid);
-  return spawnedAt !== undefined && started !== null && started >= Math.floor(spawnedAt / 1000) * 1000;
+  return spawnedAt !== undefined && started !== null && started >= (Math.floor(spawnedAt / 1000) - 1) * 1000;
 };
 
 // The group weblab started is still its own: its leader is the very

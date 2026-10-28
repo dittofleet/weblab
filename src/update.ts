@@ -42,7 +42,7 @@ export async function update(): Promise<number> {
     return 0;
   }
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const url = `https://github.com/${REPO}/releases/download/v${latest}/weblab-darwin-${arch}`;
+  const url = `https://github.com/${REPO}/releases/download/v${latest}/weblab-${process.platform}-${arch}`;
   console.log(`Downloading ${url}...`);
   const response = await fetch(url, { signal: AbortSignal.timeout(5 * 60_000) });
   if (!response.ok) throw new Error(`the download failed: ${response.status} ${response.statusText}`);

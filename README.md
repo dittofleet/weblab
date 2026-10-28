@@ -10,7 +10,13 @@ weblab is an MCP server that drives real browsers, so AI agents can test and exp
 curl -fsSL https://raw.githubusercontent.com/dittofleet/weblab/main/install.sh | sh
 ```
 
-This puts one binary at `~/.local/bin/weblab` (set `WEBLAB_INSTALL_DIR` to change that). weblab runs on macOS, on Apple silicon and Intel, and drives a browser already on the machine: Google Chrome by default, or another Chromium browser.
+This puts one binary at `~/.local/bin/weblab` (set `WEBLAB_INSTALL_DIR` to change that). weblab runs on macOS, on Apple silicon and Intel, and on Linux on x86_64. It drives a browser already on the machine: Google Chrome by default, or another Chromium browser.
+
+### On Linux
+
+Install Google Chrome from Google's `.deb`, which keeps it updated through apt. Ubuntu's Chromium is a snap, which can't reach `/tmp` or hidden folders in the home folder, so uploads from there, downloads and `persist` don't work with it.
+
+Without a display, as on a server, `headed` is refused, and an Electron app needs a virtual one, which [Sessions](docs/sessions.md#starting-it-with-a-debugging-port) shows how to give it. `screen` shots work on macOS only.
 
 To update, run `weblab update`. A running weblab looks for a newer release once a day, and says so in the reply to `new` when there is one.
 

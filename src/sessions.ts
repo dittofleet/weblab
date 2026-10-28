@@ -254,6 +254,9 @@ function checked(options: SessionOptions): SessionOptions {
   if (options.attach !== undefined && launchOnly.length > 0) {
     throw new UsageError(`new: ${launchOnly.join(", ")} can't be used with attach: that browser is already running as it is`);
   }
+  if (options.headed && process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    throw new UsageError("new: headed needs a display, and there is none here ($DISPLAY isn't set)");
+  }
   checkTimeout(options.timeout, "new");
   checkTimeout(options.startTimeout, "new: startTimeout");
   return options;

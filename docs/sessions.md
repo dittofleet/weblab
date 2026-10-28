@@ -163,6 +163,12 @@ weblab can also start the app itself, and stop it when the session ends. Give th
 { "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "./node_modules/.bin/electron-forge start -- --remote-debugging-port=9222 --inspect=9229" }
 ```
 
+On a Linux machine without a display, such as a server, an Electron app won't start. `xvfb-run -a` (from the `xvfb` package) in front of its command gives it a virtual one. Ubuntu 24.04 and later also block the sandbox an Electron app from `node_modules` uses, so it needs `--no-sandbox` there:
+
+```json
+{ "name": "app", "attach": 9222, "address": 9222, "mainProcess": 9229, "start": "xvfb-run -a ./node_modules/.bin/electron-forge start -- --no-sandbox --remote-debugging-port=9222 --inspect=9229" }
+```
+
 If an app started by hand exits at once with `Cannot find module 'electron'`, it ran as plain Node. The shell has `ELECTRON_RUN_AS_NODE` set, which happens in a terminal opened from another Electron app, such as an editor. Put `env -u ELECTRON_RUN_AS_NODE` in front of the command. Commands weblab starts never get the variable.
 
 ### Driving it
@@ -241,7 +247,7 @@ Stubs are put back when the session ends, but anything else the code changes sta
 
 ## Other browsers and engines
 
-By default a session launches the Google Chrome already installed, headless. `browser` picks another installed Chromium browser: `edge`, `brave`, `chromium`, `helium`, `vivaldi`, `arc`, `opera`, the Chrome and Edge beta, dev and canary channels, the name of any app in `/Applications`, or a path to a binary or `.app`. weblab never downloads one of these.
+By default a session launches the Google Chrome already installed, headless. `browser` picks another installed Chromium browser: `edge`, `brave`, `chromium`, `helium`, `vivaldi`, `arc`, `opera`, the Chrome and Edge beta, dev and canary channels, the name of any app in `/Applications` on a Mac or program on the `PATH`, or a path to a binary or `.app`. weblab never downloads one of these.
 
 For what only shows in another engine, `"browser": "webkit"` (or `"safari"`) and `"browser": "firefox"` run the same steps there. These are Playwright's own builds of the engines, not the Safari or Firefox installed on the machine. Each is a one-time download, and a session that needs one says the exact command, such as:
 

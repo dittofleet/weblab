@@ -1,6 +1,6 @@
 // Compiles weblab into one self-contained binary per target.
 //   bun scripts/build.ts                          this machine, to dist/weblab
-//   bun scripts/build.ts darwin-arm64 darwin-x64  named targets, to dist/weblab-<target>
+//   bun scripts/build.ts darwin-arm64 linux-x64   named targets, to dist/weblab-<target>
 import { $ } from "bun";
 import { join } from "node:path";
 
@@ -39,7 +39,7 @@ async function build(outfile: string, target?: string): Promise<void> {
   if (!result.success) throw new AggregateError(result.logs, `build failed: ${outfile}`);
   // An arm64 Mac kills a binary whose signature does not hold, and the
   // one bun leaves does not always. Ad-hoc is enough to run locally.
-  await $`codesign --force --sign - ${outfile}`.quiet();
+  if ((target ?? process.platform).startsWith("darwin")) await $`codesign --force --sign - ${outfile}`.quiet();
   console.log(`built ${outfile} (${version})`);
 }
 
