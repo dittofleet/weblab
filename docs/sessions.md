@@ -247,7 +247,7 @@ Stubs are put back when the session ends, but anything else the code changes sta
 
 ## Other browsers and engines
 
-By default a session launches the Google Chrome already installed, headless. `browser` picks another installed Chromium browser: `edge`, `brave`, `chromium`, `helium`, `vivaldi`, `arc`, `opera`, the Chrome and Edge beta, dev and canary channels, the name of any app in `/Applications` on a Mac or program on the `PATH`, or a path to a binary or `.app`. weblab never downloads one of these.
+By default a session launches the Google Chrome already installed, headless. `browser` picks another installed Chromium browser: `edge`, `brave`, `chromium`, `helium`, `vivaldi`, `arc`, `opera`, the Chrome and Edge beta, dev and canary channels, the name of any app in `/Applications` on a Mac or program on the `PATH`, or a path to a binary or `.app`. weblab never downloads one of these. Ubuntu's Chromium is a snap, which can't reach `/tmp` or hidden folders in the home folder, so uploads from there, downloads and `persist` don't work with it.
 
 For what only shows in another engine, `"browser": "webkit"` (or `"safari"`) and `"browser": "firefox"` run the same steps there. These are Playwright's own builds of the engines, not the Safari or Firefox installed on the machine. Each is a one-time download, and a session that needs one says the exact command, such as:
 
