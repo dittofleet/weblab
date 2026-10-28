@@ -11,7 +11,9 @@ const defaultReady = () => {
   const root = document.querySelector("#root, #app");
   return root ? root.childElementCount > 0 : document.readyState === "complete";
 };
-const READY_TIMEOUT = 60_000;
+// A cold dev server can take a while to build a page and to mount the
+// app, so going to one, and its app becoming ready, gets at least a minute.
+const coldTimeout = (ctx: ActionContext) => Math.max(ctx.timeout, 60_000);
 
 export const READY_KEYS = ["selector", "text", "js", "timeout"];
 
@@ -28,8 +30,7 @@ export function readyArg(action: string, given: unknown): Ready | false | undefi
 export async function waitReady(ctx: ActionContext, given: Ready | false | undefined): Promise<void> {
   if (given === false) return;
   const ready = given ?? ctx.app.settings.ready ?? {};
-  // A cold dev server can take a while, so ready gets at least a minute.
-  const timeout = ready.timeout ?? Math.max(ctx.timeout, READY_TIMEOUT);
+  const timeout = ready.timeout ?? coldTimeout(ctx);
   if (ready.selector !== undefined) {
     await ctx.page.locator(ready.selector).first().waitFor({ timeout });
   } else if (ready.text !== undefined) {
@@ -88,7 +89,7 @@ export const navigationSteps: Record<string, Action> = {
   goto: async (ctx, args) => {
     const { url, ready } = arg<{ url: string; ready?: unknown }>(args, "url", "goto");
     if (typeof url !== "string") bad("goto", `a path or URL, or { url, ready }`);
-    const response = await ctx.page.goto(absolute(ctx, url, "goto"), { waitUntil: "load" });
+    const response = await ctx.page.goto(absolute(ctx, url, "goto"), { waitUntil: "load", timeout: coldTimeout(ctx) });
     // The page loaded, but as an error page: worth knowing before trusting a screenshot of it.
     if (response !== null && response.status() >= 400) ctx.note(`${url} answered ${response.status()}`);
     await appReady(ctx, readyArg("goto", ready));
@@ -97,7 +98,7 @@ export const navigationSteps: Record<string, Action> = {
 
   reload: async (ctx, args) => {
     if (args !== true && args !== undefined && !isObject(args)) bad("reload", "no argument, or { ready }");
-    await ctx.page.reload({ waitUntil: "load" });
+    await ctx.page.reload({ waitUntil: "load", timeout: coldTimeout(ctx) });
     await appReady(ctx, isObject(args) ? readyArg("reload", args.ready) : undefined);
   },
 

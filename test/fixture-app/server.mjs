@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const PAGE = `<!doctype html>
 <title>fixture</title>
@@ -64,12 +65,15 @@ const ROUTES = {
   "/react/App.js": built("App.js", "text/javascript"),
   "/react/App.js.map": built("App.js.map", "application/json"),
   "/other": () => [200, "text/html", "<!doctype html><title>other</title><h1>Other page</h1>"],
+  // A page that takes vite a while to build, as a first request does.
+  "/slow": () => [200, "text/html", "<!doctype html><title>slow</title><h1>Built</h1>"],
   "/api/me": () => [200, "application/json", JSON.stringify({ name: "real" })],
   // What it was started with that a server reads its port from, if anything.
   "/env": () => [200, "application/json", JSON.stringify({ PORT: process.env.PORT ?? null })],
 };
 
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
+  if (request.url === "/slow") await sleep(1500);
   const [status, type, body] = ROUTES[request.url]?.() ?? [404, "text/plain", "not found"];
   response.writeHead(status, { "content-type": type }).end(body);
 });

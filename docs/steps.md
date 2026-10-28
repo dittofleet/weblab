@@ -51,7 +51,7 @@ Beside its action, any step may carry:
 { "steps": [{ "expect": { "hidden": "#banner" }, "message": "the banner is still there", "timeout": 2000 }] }
 ```
 
-Each step gets its own `timeout`, else the `timeout` given to `run`, else the session's `timeout`, else 10 seconds. `goto` and `reload` give the app at least 60 seconds to become ready, since a cold dev server can take that long.
+Each step gets its own `timeout`, else the `timeout` given to `run`, else the session's `timeout`, else 10 seconds. `goto` and `reload` give the page at least 60 seconds to load and the app to become ready, since a cold dev server can take that long.
 
 An object holding two actions, or none, is refused before any step runs. An option a step doesn't take fails the step, naming the nearest one it does: `shot: no option "fulPage" (did you mean "fullPage"?)`. An option that belongs beside the action, put inside it, is pointed out the same way.
 
