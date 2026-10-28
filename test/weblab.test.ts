@@ -467,6 +467,17 @@ test("a server someone else started is used as it is, and left running", async (
   }
 });
 
+test("a page a cold dev server takes a while to build still loads, whatever the session's timeout", async () => {
+  const lab = weblab();
+  // The page takes longer to build than the session gives a step.
+  const opened = await lab.tool("new", { ...BASE, path: "/slow", timeout: 1000 });
+  assert.equal(opened.failed, false, opened.text);
+  assert.match(opened.text, /title slow/);
+  const reloaded = await lab.tool("run", { steps: [{ reload: true }] });
+  assert.equal(reloaded.failed, false, reloaded.text);
+  await lab.close();
+});
+
 test("weblab won't start a server in the folder it was started in when the repository is checked out elsewhere too", async () => {
   // A repository of its own, with the fixture's server in it.
   const repo = join(scratch, "checkouts", "shop");
