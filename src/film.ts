@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Disposable, Page } from "playwright-core";
+import playwright from "playwright-core/package.json" with { type: "json" };
 import { CURSOR, REMOVE_CURSOR } from "./cursor.ts";
 import { briefError, SetupError } from "./errors.ts";
 import { slug } from "./state.ts";
@@ -61,7 +62,12 @@ export function filming(dir: string, files: string, say: (line: string) => void)
       // Playwright counts a screencast that failed to start as started: stopped, so a later take can.
       await page.screencast.stop().catch(() => {});
       await uncursor(page, cursor);
-      throw new SetupError(`could not record the tab: ${briefError(error)}`);
+      const message = briefError(error);
+      throw new SetupError(
+        /executable doesn't exist/i.test(message)
+          ? `recording needs Playwright's own ffmpeg, a one-time download: bunx playwright-core@${playwright.version} install ffmpeg`
+          : `could not record the tab: ${message}`,
+      );
     });
     take.tabs.push({ page, path, cursor });
   }

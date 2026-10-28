@@ -231,6 +231,7 @@ A browser's own screenshots hold only what the page draws. What the operating sy
 
 A page, element or window capture holds this browser's window and the menus it has open, and nothing else, even when another window lies over it. It needs:
 
+- **macOS**.
 - **A window**: a session opened with `headed`, or one that attached to a running browser or app. A headless session is refused.
 - **A Chromium browser**, since it asks the browser where its window is over the DevTools protocol.
 - **Screen recording allowed** for the app weblab runs under (the terminal, or the agent's app), in System Settings > Privacy & Security > Screen & System Audio Recording. weblab says so if it isn't.

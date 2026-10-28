@@ -4,19 +4,13 @@ set -eu
 REPO="dittofleet/weblab"
 DEST="${WEBLAB_INSTALL_DIR:-$HOME/.local/bin}"
 
-if [ "$(uname -s)" != "Darwin" ]; then
-  echo "weblab runs on macOS." >&2
-  exit 1
-fi
-
-ARCH=$(uname -m)
-case "$ARCH" in
-  arm64|aarch64) ARCH=arm64 ;;
-  x86_64) ARCH=x64 ;;
-  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) ASSET=weblab-darwin-arm64 ;;
+  Darwin-x86_64) ASSET=weblab-darwin-x64 ;;
+  Linux-x86_64) ASSET=weblab-linux-x64 ;;
+  *) echo "weblab runs on macOS, and on Linux on x86_64." >&2; exit 1 ;;
 esac
 
-ASSET="weblab-darwin-${ARCH}"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 mkdir -p "$DEST"

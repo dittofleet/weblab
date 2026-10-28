@@ -201,6 +201,8 @@ async function captureWindow(ctx: ActionContext, path: string, bounds: Rect, par
  * page, one element, the whole window, or the display it is on.
  */
 export async function captureScreen(ctx: ActionContext, path: string, area: ScreenArea, target?: Locator): Promise<void> {
+  // Everything below asks macOS.
+  if (process.platform !== "darwin") ctx.usage(`shot: "screen" captures the real screen, which weblab does on macOS only`);
   if (!ctx.windowed) {
     ctx.usage(`shot: "screen" captures the real screen, so the browser needs a window: open the session with headed, or attach to an app that has one`);
   }

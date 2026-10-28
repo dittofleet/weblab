@@ -554,7 +554,8 @@ test("killed along with its watcher, a weblab's browser and server are stopped b
       process.kill(watcher, "SIGKILL");
       await lab.kill("SIGKILL");
       await sleep(500);
-      assert.ok(inGroup(browser).length > 0, "with no watcher, nothing has stopped it yet");
+      // On Linux, Chrome quits by itself the moment the weblab driving it is gone. The server doesn't.
+      if (process.platform === "darwin") assert.ok(inGroup(browser).length > 0, "with no watcher, nothing has stopped it yet");
       assert.equal(await answers(origin), true);
 
       const next = weblab();
@@ -906,7 +907,7 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   await lab.close();
 });
 
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/google/chrome/chrome";
 
 // A Chrome started the way an Electron app or a debuggable browser is: with a port to join it by.
 async function runningChrome(name: string, title: string): Promise<{ port: number; pid: number; stop(): void }> {
