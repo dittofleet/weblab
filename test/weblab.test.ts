@@ -317,6 +317,20 @@ test("every kind of step and target works from a file, and a saved sign-in carri
   await lab.close();
 });
 
+test("requests that failed alike are told once, with how many more there were", async () => {
+  const lab = weblab();
+  const opened = await lab.tool("new", { ...BASE, path: "/broken" });
+  const origin = originIn(opened.text);
+  // The scripts load at once, so any of them can be the one told.
+  assert.match(opened.text, new RegExp(`\\[http 404 GET ${origin}/gone/[abc]\\.js\\] \\(and 2 more like it\\)`));
+  assert.match(opened.text, new RegExp(`\\[console\\.error\\] Failed to load resource: .*404.* \\(${origin}/gone/[abc]\\.js\\) \\(and 2 more like it\\)`));
+  const gone = opened.text.split("\n").filter((line) => line.includes("/gone/"));
+  assert.ok(gone.every((line) => line.endsWith(" (and 2 more like it)")), opened.text);
+  // One from another folder is told on its own.
+  assert.match(opened.text, new RegExp(`\\[http 404 GET ${origin}/lost/d\\.js\\]$`, "m"));
+  await lab.close();
+});
+
 test("a failed step says why with a picture, stops the run, and leaves the session to go on", async () => {
   const lab = weblab();
   const dir = out();

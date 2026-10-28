@@ -67,6 +67,8 @@ const ROUTES = {
   "/other": () => [200, "text/html", "<!doctype html><title>other</title><h1>Other page</h1>"],
   // A page that takes vite a while to build, as a first request does.
   "/slow": () => [200, "text/html", "<!doctype html><title>slow</title><h1>Built</h1>"],
+  // Scripts that aren't there, as a dev server still building fails them.
+  "/broken": () => [200, "text/html", '<!doctype html><title>broken</title><script src="/gone/a.js"></script><script src="/gone/b.js"></script><script src="/gone/c.js"></script><script src="/lost/d.js"></script>'],
   "/api/me": () => [200, "application/json", JSON.stringify({ name: "real" })],
   // What it was started with that a server reads its port from, if anything.
   "/env": () => [200, "application/json", JSON.stringify({ PORT: process.env.PORT ?? null })],

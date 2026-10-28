@@ -54,6 +54,24 @@ function collapse(lines: string[]): string[] {
   return out.map(([line, count]) => (count === 1 ? line : `${line} (x${count})`));
 }
 
+// Requests that failed alike from the same folder, as the first of them
+// with a count: a dev server still building can fail dozens at once, each
+// as an http line, the browser's "Failed to load resource" and a failed request.
+const FAILED = /^\[(http \d|requestfailed\]|console\.error\] Failed to load resource)/;
+// A URL up to its last slash, and the rest of it.
+const URL_FILE = /(:\/\/\S*\/)\S*/g;
+function sameFailures(lines: string[]): string[] {
+  // Any other line is a kind of its own, by its place.
+  const kinds = new Map<string | number, { line: string; more: number }>();
+  for (const [at, line] of lines.entries()) {
+    const kind = FAILED.test(line) ? line.replace(URL_FILE, "$1") : at;
+    const seen = kinds.get(kind);
+    if (seen !== undefined) seen.more += 1;
+    else kinds.set(kind, { line, more: 0 });
+  }
+  return [...kinds.values()].map(({ line, more }) => (more === 0 ? line : `${line} (and ${more} more like it)`));
+}
+
 // ---- what a job has left to say
 
 /** A job under way, and how much of it replies have told already. */
@@ -154,7 +172,7 @@ async function where(name: string, always: boolean): Promise<string[]> {
   const tabs = ctx.context.pages().map((tab, index) => `tab ${index}${tab === ctx.page ? "*" : " "} ${tab.url()}`);
   if (tabs.length > 1 && (always || tabs.join("\n") !== open.shownTabs)) lines.push(...tabs);
   open.shownTabs = tabs.join("\n");
-  const all = collapse(open.consoleSinceLast().filter((line) => !line.startsWith("--- ") && !line.startsWith("[weblab]")));
+  const all = collapse(sameFailures(open.consoleSinceLast().filter((line) => !line.startsWith("--- ") && !line.startsWith("[weblab]"))));
   if (all.length > 0) {
     // Stacks in the lines shown point at the source, as the project names it, not at what was served.
     const shown = await Promise.all(all.slice(-MAX_CONSOLE_LINES).map((line) => mapText(line, (place) => ctx.sources.known(place))));
