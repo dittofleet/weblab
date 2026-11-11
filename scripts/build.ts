@@ -14,7 +14,7 @@ const FROM_DISK = /require\(import_path\d*\.default\.join\(packageRoot, "(packag
 const embedPlaywrightData: Bun.BunPlugin = {
   name: "embed-playwright-data",
   setup(build) {
-    build.onLoad({ filter: /playwright-core\/lib\/[^/]+\.js$/ }, async ({ path }) => {
+    build.onLoad({ filter: /playwright-core[\\/]lib[\\/][^\\/]+\.js$/ }, async ({ path }) => {
       const source = await Bun.file(path).text();
       return { contents: source.replace(FROM_DISK, 'require("../$1.json")'), loader: "js" };
     });

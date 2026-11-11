@@ -6,9 +6,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Disposable, Page } from "playwright-core";
-import playwright from "playwright-core/package.json" with { type: "json" };
 import { CURSOR, REMOVE_CURSOR } from "./cursor.ts";
 import { briefError, SetupError } from "./errors.ts";
+import { ensureFfmpeg } from "./ffmpeg.ts";
 import { slug } from "./state.ts";
 
 // Held on the last frame of a take so the outcome is readable.
@@ -62,12 +62,7 @@ export function filming(dir: string, files: string, say: (line: string) => void)
       // Playwright counts a screencast that failed to start as started: stopped, so a later take can.
       await page.screencast.stop().catch(() => {});
       await uncursor(page, cursor);
-      const message = briefError(error);
-      throw new SetupError(
-        /executable doesn't exist/i.test(message)
-          ? `recording needs Playwright's own ffmpeg, a one-time download: bunx playwright-core@${playwright.version} install ffmpeg`
-          : `could not record the tab: ${message}`,
-      );
+      throw new SetupError(`could not record the tab: ${briefError(error)}`);
     });
     take.tabs.push({ page, path, cursor });
   }
@@ -77,6 +72,9 @@ export function filming(dir: string, files: string, say: (line: string) => void)
       return take !== null;
     },
     async start(page, as) {
+      await ensureFfmpeg().catch((error) => {
+        throw new SetupError(`recording needs Playwright's own ffmpeg, which couldn't be downloaded: ${briefError(error)}`);
+      });
       takes += 1;
       mkdirSync(join(dir, "videos"), { recursive: true });
       take = { name: as === undefined ? (takes === 1 ? files : `${files}-take${takes}`) : `${files}-${slug(as)}`, tabs: [] };

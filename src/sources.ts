@@ -4,7 +4,7 @@
 // The source map each script carries says where that came from.
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** A place in code: 1-based line and column, as stacks print them. */
@@ -252,6 +252,8 @@ export function sourceMapper(fetchText: (url: string) => Promise<string | null>,
         }
       }
     }
+    // As the project would write it, on any system.
+    file = file.replaceAll(sep, "/");
     // A package's file by the package's own path: pnpm's store adds a long versioned prefix.
     const modules = file.lastIndexOf("node_modules/");
     if (modules !== -1) file = file.slice(modules + "node_modules/".length);
@@ -275,7 +277,7 @@ export function sourceMapper(fetchText: (url: string) => Promise<string | null>,
   async function origin(place: Place): Promise<Place | null> {
     // A path on disk (React's own records of a file, Node's stacks) is read as a file.
     const named = serverFile(place.file);
-    const file = named.startsWith("/") ? pathToFileURL(named).href : named;
+    const file = isAbsolute(named) ? pathToFileURL(named).href : named;
     const map = await mapOf(file);
     return map === null ? null : lookup(map, place.line - 1, (place.column ?? 1) - 1);
   }
@@ -301,13 +303,13 @@ export function sourceMapper(fetchText: (url: string) => Promise<string | null>,
 
 // A place in code within a line of text: the page's, "(http://localhost:5173/src/App.tsx?t=1:12:5)",
 // or a file's on disk, as an Electron app's main process names them, "(/app/build/main.js:40:11)".
-const PLACE_IN_TEXT = /(https?:\/\/[^\s()'"]+?|file:\/\/[^\s()'"]+?|(?<=[(\s]|^)\/[^\s()'"]+?):(\d+):(\d+)/g;
+const PLACE_IN_TEXT = /(https?:\/\/[^\s()'"]+?|file:\/\/[^\s()'"]+?|(?<=[(\s]|^)(?:[a-z]:[\\/]|\/)[^\s()'"]+?):(\d+):(\d+)/gi;
 
 /** A line of text (a console message, a stack) with the places in code in it put as places in the project's source. */
 export async function mapText(text: string, map: (place: Place) => Promise<Place | null>): Promise<string> {
   const found = [...text.matchAll(PLACE_IN_TEXT)];
   if (found.length === 0) return text;
-  const address = (file: string) => (file.startsWith("/") ? pathToFileURL(file).href : file);
+  const address = (file: string) => (isAbsolute(file) ? pathToFileURL(file).href : file);
   const mapped = await Promise.all(found.map((match) => map({ file: address(match[1] as string), line: Number(match[2]), column: Number(match[3]) }).catch(() => null)));
   let at = 0;
   let out = "";

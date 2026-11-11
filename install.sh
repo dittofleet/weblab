@@ -8,7 +8,7 @@ case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) ASSET=weblab-darwin-arm64 ;;
   Darwin-x86_64) ASSET=weblab-darwin-x64 ;;
   Linux-x86_64) ASSET=weblab-linux-x64 ;;
-  *) echo "weblab runs on macOS, and on Linux on x86_64." >&2; exit 1 ;;
+  *) echo "weblab runs on macOS, on Linux on x86_64, and on Windows through install.ps1." >&2; exit 1 ;;
 esac
 
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
@@ -25,6 +25,7 @@ curl -fsSL "$URL" -o "$TMP"
 chmod 755 "$TMP"
 mv "$TMP" "$DEST/weblab"
 echo "Installed weblab to $DEST/weblab" >&2
+"$DEST/weblab" --fetch-ffmpeg
 
 case ":$PATH:" in
   *":$DEST:"*) ;;

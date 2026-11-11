@@ -11,9 +11,9 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { after, test as nodeTest } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { processTable as processes } from "../src/processes.ts";
+import { membersOf as inGroup, processTable as processes } from "../src/processes.ts";
 import { STEP_NAMES } from "../src/steps/index.ts";
-import { onPath } from "../src/util.ts";
+import { escapeRegExp } from "../src/util.ts";
 
 // From source by default; WEBLAB_BIN points the same tests at a compiled binary.
 const [bin, ...prefix] = process.env.WEBLAB_BIN ? [resolve(process.env.WEBLAB_BIN)] : ["bun", join(import.meta.dirname, "..", "src", "main.ts")];
@@ -25,6 +25,12 @@ const scratch = mkdtempSync(join(tmpdir(), "weblab-test-"));
 const temp = join(scratch, "tmp");
 mkdirSync(temp);
 const VERSION = "2026-07-28";
+// The browser these tests run: WEBLAB_TEST_BROWSER, or Chrome where it is usually installed.
+const CHROME = (process.env.WEBLAB_TEST_BROWSER ?? {
+  darwin: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  linux: "/opt/google/chrome/chrome",
+  win32: [process.env.ProgramFiles, process.env.LOCALAPPDATA].map((root) => `${root}\\Google\\Chrome\\Application\\chrome.exe`).find((path) => existsSync(path)),
+}[process.platform as string]) as string;
 const freePort = () =>
   new Promise<number>((done) => {
     const probe = createServer();
@@ -38,7 +44,7 @@ const freePort = () =>
 // the command that starts it there. The fixture's folder is named, as
 // this repository may have other worktrees, where weblab won't start a
 // server in the folder it was started in without being told.
-const LOOKS = { viewport: "800x600@1", ignore: ["favicon"] };
+const LOOKS = { viewport: "800x600@1", ignore: ["favicon"], ...(process.env.WEBLAB_TEST_BROWSER ? { browser: CHROME } : {}) };
 const PORT = await freePort();
 const START = `node server.mjs --port ${PORT}`;
 const BASE = { ...LOOKS, dir: app, address: PORT, start: START };
@@ -74,7 +80,7 @@ const all: Weblab[] = [];
 let count = 0;
 
 function weblab(env: Record<string, string> = {}, cwd = app): Weblab {
-  const child = spawn(bin as string, prefix, { cwd, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), TMPDIR: temp, WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(bin as string, prefix, { cwd, env: { ...process.env, XDG_STATE_HOME: join(scratch, "state"), TMPDIR: temp, TEMP: temp, TMP: temp, WEBLAB_NO_UPDATE_CHECK: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const waiting = new Map<number, (message: any) => void>();
   createInterface({ input: child.stdout! }).on("line", (line) => {
     // Nothing but the protocol is ever on stdout.
@@ -148,14 +154,11 @@ const browserGroups = new Set<number>();
 /** The browsers a weblab launched, by the process groups they lead (their helpers are in them too). */
 function browsersOf(lab: Weblab): number[] {
   const groups = processes()
-    .filter((one) => one.ppid === lab.child.pid && one.pid === one.pgid && one.command.includes(temp))
-    .map((one) => one.pgid);
+    .filter((one) => one.ppid === lab.child.pid && one.command.includes(temp))
+    .map((one) => one.pid);
   for (const group of groups) browserGroups.add(group);
   return groups;
 }
-
-/** The processes left in a group: a browser and its helpers. */
-const inGroup = (pgid: number) => processes().filter((one) => one.pgid === pgid);
 
 /** The watcher started beside a weblab, to sweep up after it. */
 const watcherOf = (lab: Weblab) => processes().find((one) => one.ppid === lab.child.pid && / --sweep$/.test(one.command))?.pid;
@@ -234,7 +237,7 @@ test("new runs start when nothing answers, run drives the page and shows it, end
   const opened = await lab.tool("new", { ...BASE, out: dir });
   assert.equal(opened.failed, false, opened.text);
   assert.match(opened.text, new RegExp(`^session main {2}at http://localhost:${PORT} \\(server started by weblab: ${START}\\)`));
-  assert.match(opened.text, new RegExp(`started the server at http://localhost:${PORT} \\(${START} in ${app}\\)`));
+  assert.match(opened.text, new RegExp(`started the server at http://localhost:${PORT} \\(${START} in ${escapeRegExp(app)}\\)`));
   assert.match(opened.text, /ok {4}1 goto/);
   assert.match(opened.text, /title fixture/);
   assert.match(opened.text, /console since the last reply:\n {2}\[console\.log\] fixture mounted/);
@@ -301,7 +304,7 @@ test("every kind of step and target works from a file, and a saved sign-in carri
   const signedIn = await lab.tool("new", { ...BASE, name: "ada", state: "ada", trace: true, out: dir });
   assert.equal(signedIn.failed, false, signedIn.text);
   assert.equal((await lab.tool("run", { session: "ada", file: join(kit, "other", "signed-in.json") })).failed, false);
-  assert.match((await lab.tool("end", { session: "ada" })).text, /trace .*traces\/ada\.zip/);
+  assert.match((await lab.tool("end", { session: "ada" })).text, /trace .*traces[\\/]ada\.zip/);
   assert.ok(existsSync(join(dir, "traces", "ada.zip")));
 
   const nobody = await lab.tool("new", { ...BASE, name: "x", state: "nobody" });
@@ -473,7 +476,7 @@ test("a server someone else started is used as it is, and left running", async (
     assert.match((await nothing.tool("new", { start: "node server.mjs", dir: scratch })).text, /new: start needs address/);
     assert.match((await nothing.tool("new", { address: "not a place" })).text, /address: "not a place" isn't a URL, host:port, or a port/);
     // A command that fails says so, with what it printed.
-    const crashed = await nothing.tool("new", { address: empty, start: "echo no such app; exit 3", dir: scratch });
+    const crashed = await nothing.tool("new", { address: empty, start: `node -e "console.log('no such app'); process.exit(3)"`, dir: scratch });
     assert.match(crashed.text, /the server exited with code 3 before answering; see .*\n\s+no such app/);
     await nothing.close();
   } finally {
@@ -608,7 +611,9 @@ test("a session ending, the client going, and a signal each leave no browser run
   await gone(shared);
   await ended.close();
 
-  for (const leave of [(lab: Weblab) => lab.close(), (lab: Weblab) => lab.kill("SIGTERM")]) {
+  // On Windows a signal is a kill: that weblab can't close anything, and its watcher does.
+  const signalled = process.platform !== "win32";
+  for (const leave of [(lab: Weblab) => lab.close(), ...(signalled ? [(lab: Weblab) => lab.kill("SIGTERM")] : [])]) {
     const lab = weblab();
     assert.equal((await lab.tool("new", { ...BASE })).failed, false);
     const [browser] = browsersOf(lab);
@@ -619,19 +624,22 @@ test("a session ending, the client going, and a signal each leave no browser run
   }
 
   // A helper that outlives its browser (one that hangs) is stopped with it.
-  const hung = weblab();
-  assert.equal((await hung.tool("new", { ...BASE })).failed, false);
-  const [group] = browsersOf(hung);
-  assert.ok(group !== undefined);
-  const helper = inGroup(group).find((one) => one.pid !== group);
-  assert.ok(helper !== undefined);
-  process.kill(helper.pid, "SIGSTOP");
-  process.kill(group, "SIGKILL");
-  await eventually(() => !processes().some((one) => one.pid === group), "the browser has gone");
-  assert.ok(inGroup(group).some((one) => one.pid === helper.pid), "the stopped helper outlives it");
-  await hung.tool("end");
-  await gone(group);
-  await hung.close();
+  // Windows has no way to hang a process from outside.
+  if (signalled) {
+    const hung = weblab();
+    assert.equal((await hung.tool("new", { ...BASE })).failed, false);
+    const [group] = browsersOf(hung);
+    assert.ok(group !== undefined);
+    const helper = inGroup(group).find((one) => one.pid !== group);
+    assert.ok(helper !== undefined);
+    process.kill(helper.pid, "SIGSTOP");
+    process.kill(group, "SIGKILL");
+    await eventually(() => !processes().some((one) => one.pid === group), "the browser has gone");
+    assert.ok(inGroup(group).some((one) => one.pid === helper.pid), "the stopped helper outlives it");
+    await hung.tool("end");
+    await gone(group);
+    await hung.close();
+  }
 
   // A session that fails to open leaves nothing it started.
   const failing = weblab();
@@ -919,20 +927,19 @@ test("a video is recorded from when it starts, with the app ready, until it stop
   // Stopped, the video is written, and the page is left without the cursor, in its frames too.
   const cursors = "[document, document.querySelector('#frame').contentDocument].map((doc) => doc.querySelector('[data-weblab-cursor]') !== null)";
   const stopped = await lab.tool("run", { steps: [{ goto: "/" }, { js: cursors }, { video: "stop" }, { js: cursors }] });
-  assert.match(stopped.text, /ok {4}2 js \(\d+ms\)\n\[\s*true,\s*true\s*\]\n[\s\S]*ok {4}4 js \(\d+ms\)\n\[\s*false,\s*false\s*\]\n[\s\S]*file {2}.*videos\/main\.webm/);
+  assert.match(stopped.text, /ok {4}2 js \(\d+ms\)\n\[\s*true,\s*true\s*\]\n[\s\S]*ok {4}4 js \(\d+ms\)\n\[\s*false,\s*false\s*\]\n[\s\S]*file {2}.*videos[\\/]main\.webm/);
   assert.ok(existsSync(join(dir, "videos", "main.webm")));
   // A tab the steps move to during a take is recorded too, even one closed before the take ends.
   const tabs = await lab.tool("run", { steps: [{ goto: "/" }, { video: "start" }, { click: "#pop" }, { tab: "new" }, { tab: { close: true } }, { video: "stop" }] });
-  assert.match(tabs.text, /file {2}.*videos\/main-take2\.webm\nfile {2}.*videos\/main-take2-tab1\.webm/);
+  assert.match(tabs.text, /file {2}.*videos[\\/]main-take2\.webm\nfile {2}.*videos[\\/]main-take2-tab1\.webm/);
   // A take still going when its session ends is written then.
   await lab.tool("run", { steps: [{ video: { as: "again" } }, { click: "h1" }] });
   const ended = await lab.tool("end", { session: "main" });
-  assert.match(ended.text, /video .*videos\/main-again\.webm/);
+  assert.match(ended.text, /video .*videos[\\/]main-again\.webm/);
   assert.ok(existsSync(join(dir, "videos", "main-again.webm")));
   await lab.close();
 });
 
-const CHROME = process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/google/chrome/chrome";
 
 // A Chrome started the way an Electron app or a debuggable browser is: with a port to join it by.
 async function runningChrome(name: string, title: string): Promise<{ port: number; pid: number; stop(): void }> {
@@ -962,7 +969,7 @@ test("two running apps are two sessions, joined by their ports and left as they 
     assert.match(ran.text, /"pressed"\nok {4}3 js on b \(\d+ms\)\n"Device B"\nok {4}4 js on b \(\d+ms\)\n"Press"/);
     // A running app's tab is recorded too, and left without the cursor drawn for it.
     const filmed = await lab.tool("run", { session: "a", steps: [{ video: "start" }, { hover: "button" }, { video: "stop" }, { js: "document.querySelector('[data-weblab-cursor]') === null" }] });
-    assert.match(filmed.text, /ok {4}4 js \(\d+ms\)\ntrue\n[\s\S]*file {2}.*videos\/a\.webm/);
+    assert.match(filmed.text, /ok {4}4 js \(\d+ms\)\ntrue\n[\s\S]*file {2}.*videos[\\/]a\.webm/);
     assert.match((await lab.tool("new", { name: "c", attach: a.port, browser: "edge" })).text, /browser can't be used with attach/);
     assert.match((await lab.tool("new", { name: "c", attach: a.port, tab: "nonesuch" })).text, /no tab in the attached browser matches "nonesuch"/);
 
@@ -977,7 +984,7 @@ test("two running apps are two sessions, joined by their ports and left as they 
   }
 });
 
-const NODE = onPath("node");
+const NODE = Bun.which("node");
 
 // An Electron app's main process, as far as weblab can tell: a Node
 // process started with --inspect, with a stand-in electron module, that

@@ -28,7 +28,9 @@ export function resolveApp(dir: string, settings: Settings = {}): App {
   if (!existsSync(start)) throw new UsageError(`dir: no such directory: ${start}`);
   // One git call for both: the checkout's top, and its common git dir,
   // which sits in the main checkout and so names the repo.
-  const [toplevel = null, commonDir = null] = git(start, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir")?.split("\n") ?? [];
+  const [top, commonDir = null] = git(start, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir")?.split("\n") ?? [];
+  // In the system's own form: git writes forward slashes everywhere.
+  const toplevel = top === undefined ? null : resolve(top);
   const root = nearestPackageDir(start, toplevel) ?? toplevel ?? start;
 
   const repo = commonDir === null ? basename(root) : basename(dirname(commonDir));

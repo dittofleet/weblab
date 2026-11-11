@@ -23,12 +23,24 @@ Its tools: new (open a session), run (run steps on one), end, list, docs.
 // make an Electron app it starts run as plain Node.
 delete process.env.ELECTRON_RUN_AS_NODE;
 
+// The pipe from the weblab being watched, read to its end: was it told to go? Where a shell waited on it, it has been read already.
+const dismissed = async () => {
+  let said = "";
+  for await (const chunk of process.stdin) said += chunk;
+  return said.trim() === "done";
+};
+
 const [flag] = process.argv.slice(2);
 if (flag === "--sweep") {
   // Run by weblab's own watcher (lifecycle.ts) once a weblab has ended. Only what it needs is loaded.
+  if (await dismissed()) process.exit(0);
   const { sweep } = await import("./reaper.ts");
   await sweep();
   process.exit(0);
+} else if (flag === "--fetch-ffmpeg") {
+  // Run by the installers and `weblab update`, so recording is ready before it is needed.
+  const [{ ensureFfmpeg }, { briefError }] = await Promise.all([import("./ffmpeg.ts"), import("./errors.ts")]);
+  await ensureFfmpeg().catch((error) => console.error(`weblab: couldn't download ffmpeg, so the first video step will try again: ${briefError(error)}`));
 } else if (flag === "--version" || flag === "-v") {
   console.log(VERSION);
 } else if (flag === "update") {

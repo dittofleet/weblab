@@ -1,8 +1,16 @@
 // Small helpers several modules share.
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
 import type { Viewport } from "./types.ts";
+
+/** True while the pid (or, negated, the process group) exists. */
+export const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
 
 /** Text made safe to use inside a regular expression. */
 export const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,12 +26,6 @@ export function tryExec(command: string, args: string[], options: { cwd?: string
     return null;
   }
 }
-
-/** Where a program is on the PATH, or null. */
-export const onPath = (program: string): string | null => {
-  const dir = (process.env.PATH ?? "").split(delimiter).find((at) => at !== "" && existsSync(join(at, program)));
-  return dir === undefined ? null : join(dir, program);
-};
 
 /** The known name closest to a misspelt one, if any is close. */
 export function nearest(word: string, names: Iterable<string>): string | undefined {

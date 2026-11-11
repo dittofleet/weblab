@@ -1,14 +1,12 @@
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type BrowserType, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { briefError, SetupError, UsageError } from "./errors.ts";
+import { os } from "./os/index.ts";
 import { ownBrowser } from "./reaper.ts";
 import { profileDir } from "./state.ts";
 import { openedByWeblab } from "./tabs.ts";
 import type { App, ContextSettings, Viewport } from "./types.ts";
-import { onPath } from "./util.ts";
 
 export const DEFAULT_VIEWPORT: Viewport = { width: 1440, height: 900, deviceScaleFactor: 2 };
 
@@ -71,35 +69,24 @@ const ENGINES: Record<string, { type: BrowserType; name: string }> = {
 /** True when the browser asked for isn't a Chromium one, so what works over the DevTools protocol doesn't. */
 export const otherEngine = (wanted: string | undefined): string | null => ENGINES[(wanted ?? "chrome").toLowerCase()]?.name ?? null;
 
-// The binary inside a macOS app bundle is named after the app.
-function insideApp(bundle: string): string | null {
-  const dir = join(bundle, "Contents", "MacOS");
-  if (!existsSync(dir)) return null;
-  const [first] = readdirSync(dir);
-  return first === undefined ? null : join(dir, first);
-}
-
 /**
  * Which browser to launch: any Chromium-based one. A name Playwright
  * knows, a name from the list above, the name of any installed app, or
- * the path to a binary or an .app bundle.
+ * the path to a binary or a macOS app bundle.
  */
 function browserToLaunch(wanted = "chrome"): { channel: string } | { executablePath: string } {
   const channel = CHANNELS[wanted.toLowerCase()];
   if (channel !== undefined) return { channel };
-  if (wanted.includes("/")) {
-    const path = wanted.endsWith(".app") ? insideApp(wanted) : wanted;
+  if (/[\\/]/.test(wanted)) {
+    const path = os.executableAt(wanted);
     if (path === null || !existsSync(path)) throw new UsageError(`browser: nothing at ${wanted}`);
     return { executablePath: path };
   }
   const known = APPS[wanted.toLowerCase()];
-  const app = known?.app ?? wanted;
-  for (const applications of ["/Applications", join(homedir(), "Applications")]) {
-    const path = insideApp(join(applications, `${app}.app`));
-    if (path !== null) return { executablePath: path };
-  }
+  const installed = os.installedApp(known?.app ?? wanted);
+  if (installed !== null) return { executablePath: installed };
   for (const bin of known?.bin ?? [wanted]) {
-    const path = onPath(bin);
+    const path = Bun.which(bin);
     if (path !== null) return { executablePath: path };
   }
   throw new UsageError(

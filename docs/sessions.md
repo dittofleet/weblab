@@ -298,7 +298,7 @@ Sign in once, save the session's cookies and storage under a name with `saveStat
 { "name": "ada", "address": 5173, "state": "ada", "path": "/account" }
 ```
 
-- Saved states are kept per project in weblab's own directory (`~/.local/state/weblab/auth/`), never in a repository or a files directory, since they hold live credentials.
+- Saved states are kept per project in weblab's own directory (`~/.local/state/weblab/auth/`, or `%LOCALAPPDATA%\weblab\auth\` on Windows), never in a repository or a files directory, since they hold live credentials.
 - Cookies and storage belong to an origin, so a state saved against `localhost:4625` applies to an app on that same port.
 - A `new` step never passes its session's sign-in on: a second session is a second user. Give it `state` to start it signed in.
 - A name nothing was saved under is refused: `no saved state named "nobody" for <project>; a saveState step saves one`.
