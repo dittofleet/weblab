@@ -5,3 +5,6 @@
 declare const WEBLAB_VERSION: string | undefined;
 
 export const VERSION: string = typeof WEBLAB_VERSION === "string" ? WEBLAB_VERSION : "dev";
+
+/** True in a compiled binary, which scripts/build.ts always stamps. False run from source. */
+export const COMPILED = typeof WEBLAB_VERSION === "string";

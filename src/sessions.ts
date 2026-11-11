@@ -8,7 +8,7 @@
 // as any other and stays until it is ended.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { type CDPSession, type Page } from "playwright-core";
 import { originOf, otherCheckouts, resolveApp } from "./app.ts";
 import { browserProcess, createBrowserManager, DEFAULT_VIEWPORT, otherEngine, type BrowserManager } from "./browser.ts";
@@ -849,7 +849,7 @@ export async function runStep(job: Job, given: Step): Promise<{ ok: boolean; rec
 function codeLine(given: Step, error: unknown): string {
   const file = (given.playwright as { file?: unknown } | undefined)?.file;
   if (typeof file !== "string" || error instanceof StepFailure) return "";
-  const name = file.split("/").pop() as string;
+  const name = basename(file);
   const line = new RegExp(`${escapeRegExp(name)}:(\\d+)`).exec((error as Error)?.stack ?? "");
   return line === null ? "" : ` (${name}:${line[1]})`;
 }

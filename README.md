@@ -10,11 +10,21 @@ weblab is an MCP server that drives real browsers, so AI agents can test and exp
 curl -fsSL https://raw.githubusercontent.com/dittofleet/weblab/main/install.sh | sh
 ```
 
-This puts one binary at `~/.local/bin/weblab` (set `WEBLAB_INSTALL_DIR` to change that). weblab runs on macOS, on Apple silicon and Intel, and on Linux on x86_64. It drives a browser already on the machine: Google Chrome by default, or another Chromium browser.
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/dittofleet/weblab/main/install.ps1 | iex
+```
+
+This puts one binary at `~/.local/bin/weblab`, or `%LOCALAPPDATA%\Programs\weblab\weblab.exe` on Windows (set `WEBLAB_INSTALL_DIR` to change that). weblab runs on macOS, on Apple silicon and Intel, on Linux on x86_64, and on Windows on x64. It drives a browser already on the machine: Google Chrome by default, or another Chromium browser. The install also fetches Playwright's small build of ffmpeg, which the `video` step records through.
 
 ### On Linux
 
 Without a display, as on a server, `headed` is refused, and an Electron app needs a virtual one, which [Sessions](docs/sessions.md#starting-it-with-a-debugging-port) shows how to give it. `screen` shots work on macOS only.
+
+### On Windows
+
+Sessions, servers, recording and attaching work as elsewhere. `screen` shots work on macOS only. Windows can't ask a console program to close, so a server weblab started is stopped outright rather than given time to shut down.
 
 To update, run `weblab update`. A running weblab looks for a newer release once a day, and says so in the reply to `new` when there is one.
 

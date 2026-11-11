@@ -285,7 +285,7 @@ A name used again after its session ended gets a number, so the earlier files st
 
 weblab saves no downloads by itself. Code can save one into the session's directory, `ctx.artifacts.dir`; [Recipes](recipes.md#upload-and-download-files) shows how.
 
-weblab's own records live outside every repository, in `$XDG_STATE_HOME/weblab` (`~/.local/state/weblab` by default): the servers it started, locks, sign-ins saved by `saveState` (under `auth/`), and profiles kept by `persist` (under `profiles/`).
+weblab's own records live outside every repository, in `$XDG_STATE_HOME/weblab` (by default `~/.local/state/weblab`, or `%LOCALAPPDATA%\weblab` on Windows): the servers it started, locks, sign-ins saved by `saveState` (under `auth/`), and profiles kept by `persist` (under `profiles/`).
 
 ## Starting weblab
 
@@ -295,6 +295,6 @@ An MCP client starts weblab and talks to it over stdin and stdout; see the [READ
 | --- | --- |
 | `WEBLAB_WAIT_MS` | The default for `run`'s `wait`, in milliseconds. |
 | `FFMPEG` | An ffmpeg binary. With it, each video also gets an `.mp4`. |
-| `TMPDIR` | Where the shared files directory goes, under `weblab/`. |
+| `TMPDIR` (`TEMP` on Windows) | Where the shared files directory goes, under `weblab/`. |
 | `XDG_STATE_HOME` | Where weblab keeps its own records, under `weblab/`. |
-| `WEBLAB_INSTALL_DIR` | Where `install.sh` puts the binary. Defaults to `~/.local/bin`. |
+| `WEBLAB_INSTALL_DIR` | Where `install.sh` or `install.ps1` puts the binary. Defaults to `~/.local/bin`, or `%LOCALAPPDATA%\Programs\weblab` on Windows. |

@@ -1,5 +1,5 @@
 // weblab's own files, kept outside every repo in $XDG_STATE_HOME/weblab
-// (~/.local/state/weblab by default):
+// (by default ~/.local/state/weblab, or %LOCALAPPDATA%\weblab on Windows):
 //
 //   <name>.json                records: a server weblab started, by its address
 //   <name>.lock                one process at a time: on a server's record, a kept profile
@@ -7,17 +7,18 @@
 //   profiles/<project>-<browser>/  browser profiles kept by `persist`
 import { randomBytes } from "node:crypto";
 import { linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { SetupError } from "./errors.ts";
+import { os } from "./os/index.ts";
 import { alive, startTime } from "./processes.ts";
 import type { App } from "./types.ts";
 
 const LOCK_WAIT_MS = 10 * 60_000;
 
 const stateDir = () =>
-  join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "weblab");
+  join(process.env.XDG_STATE_HOME ?? os.stateHome(), "weblab");
 
 /** Text made safe for a file name. */
 export const fileName = (text: string) => text.replace(/[^\w.-]+/g, "-");

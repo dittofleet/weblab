@@ -6,12 +6,13 @@
 // last of them ends.
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, realpathSync } from "node:fs";
-import { join as joinPath } from "node:path";
+import { isAbsolute, join as joinPath, relative } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { SERVER_TIMEOUT_MS } from "./app.ts";
 import { SetupError, tail } from "./errors.ts";
 import { onTeardown } from "./lifecycle.ts";
-import { allListeners, cwdOf, groupMembers, groupOf, isProcess, killGroup, killProcess, listenersOn, membersOf, type Process, processOf, running, startedAtMs, startTime } from "./processes.ts";
+import { os } from "./os/index.ts";
+import { cwdOf, groupMembers, isProcess, killGroup, membersOf, type Process, processOf, running, startedAtMs, startTime } from "./processes.ts";
 import { acquireLock, clearRecord, fileName, readRecord, recordNames, writeRecord } from "./state.ts";
 import type { App } from "./types.ts";
 
@@ -37,10 +38,9 @@ type ServerState = {
   /**
    * A server that put itself in the background (`astro dev` does): the
    * process listening on the port, which left weblab's group. Found
-   * when the server first answered. Its group is stopped only if it
-   * leads it (it called setsid); otherwise only the process is.
+   * when the server first answered, and stopped with whatever it heads.
    */
-  detached?: { pid: number; pgid: number; startedAt: string | null };
+  detached?: { pid: number; startedAt: string | null };
 };
 
 type User = Process;
@@ -102,25 +102,23 @@ const locked = (name: string, log: (line: string) => void) =>
 // Start times are kept to the second, and Linux's can read a second
 // early, so "after" is the second before the spawn's or later.
 const startedSince = (pid: number, spawnedAt: number | undefined) => {
-  const started = startedAtMs(pid);
-  return spawnedAt !== undefined && started !== null && started >= (Math.floor(spawnedAt / 1000) - 1) * 1000;
+  return spawnedAt !== undefined && startedAtMs(pid) >= (Math.floor(spawnedAt / 1000) - 1) * 1000;
 };
 
 // The group weblab started is still its own: its leader is the very
 // process spawned, or, with the leader gone (and its pid not reused),
-// everything left in the group is a process recorded in it when the
-// server answered. Anything else is let be: leaving a stray process is
-// better than signalling another agent's.
+// something recorded in the group when the server answered is still in
+// it. Anything else is let be: leaving a stray process is better than
+// signalling another agent's.
 function groupIsOurs(state: ServerState): boolean {
   if (isProcess(state.pgid, state.startedAt)) return true;
   if (running(state.pgid) || state.members === undefined) return false;
-  const recorded = state.members;
-  const members = groupMembers(state.pgid);
-  return members.length > 0 && members.every((pid) => recorded.some((member) => member.pid === pid && isProcess(pid, member.startedAt)));
+  const members = groupMembers(state.pgid, state.startedAt);
+  return state.members.some((member) => members.includes(member.pid) && isProcess(member.pid, member.startedAt));
 }
 
 const recordMembers = (state: ServerState) => {
-  state.members = membersOf(state.pgid);
+  state.members = membersOf(state.pgid, state.startedAt);
 };
 
 const me = (): User => processOf(process.pid);
@@ -134,11 +132,8 @@ const serverIsOurs = (state: ServerState) => groupIsOurs(state) || detachedIsOur
 
 // Everything that is ours to stop, and nothing that isn't.
 async function stopServer(state: ServerState): Promise<void> {
-  if (groupIsOurs(state)) await killGroup(state.pgid);
-  const { detached } = state;
-  if (detached === undefined || !detachedIsOurs(state)) return;
-  if (detached.pgid === detached.pid) await killGroup(detached.pgid);
-  else await killProcess(detached.pid);
+  if (groupIsOurs(state)) await killGroup(state.pgid, state.startedAt);
+  if (state.detached !== undefined && detachedIsOurs(state)) await killGroup(state.detached.pid);
 }
 
 /**
@@ -153,19 +148,22 @@ async function stopServer(state: ServerState): Promise<void> {
  */
 function whoseServer(state: ServerState, origin: string, wentToBackground: boolean): { ours: false } | { ours: true; detached?: ServerState["detached"] } {
   const port = Number(new URL(origin).port);
-  const listeners = port ? listenersOn(port) : [];
-  if (listeners.length === 0 || listeners.some((pid) => groupOf(pid) === state.pgid)) return { ours: true };
+  const listeners = port ? os.listeners(port) : [];
+  if (listeners.length === 0) return { ours: true };
+  const group = groupMembers(state.pgid, state.startedAt);
+  if (listeners.some((pid) => group.includes(pid))) return { ours: true };
   if (!wentToBackground) return { ours: false };
   const before = new Set(state.listeningBefore ?? []);
   const dir = realpathSync(state.dir);
   const inProject = (pid: number) => {
     const cwd = cwdOf(pid);
-    return cwd !== null && (cwd === dir || cwd.startsWith(`${dir}/`));
+    if (cwd === null) return false;
+    const inside = relative(dir, cwd);
+    return !inside.startsWith("..") && !isAbsolute(inside);
   };
   const moved = listeners.find((pid) => !before.has(pid) && startedSince(pid, state.spawnedAt) && inProject(pid));
-  const pgid = moved === undefined ? null : groupOf(moved);
-  if (moved === undefined || pgid === null) return { ours: false };
-  return { ours: true, detached: { pid: moved, pgid, startedAt: startTime(moved) } };
+  if (moved === undefined) return { ours: false };
+  return { ours: true, detached: { pid: moved, startedAt: startTime(moved) } };
 }
 
 export async function probe(origin: string, timeoutMs = 1500): Promise<boolean> {
@@ -289,17 +287,17 @@ async function startServer(app: App, command: string, wanted: string, options: O
   mkdirSync(options.logDir, { recursive: true });
   const logFile = joinPath(options.logDir, `server-${fileName(new URL(wanted).host)}.log`);
   const out = openSync(logFile, "a");
-  // Its own process group, so teardown reaches vite under the
+  // A group of its own, so teardown reaches vite under the
   // package-manager wrapper, not just the wrapper.
-  const listeningBefore = [...allListeners()];
+  const listeningBefore = os.listeners();
   const spawnedAt = Date.now();
   // Run as given, with weblab's own environment: where to listen is the
   // command's to say, so nothing is added that whatever it starts would
   // inherit (a PORT meant for one server would reach every one).
   const child = spawn(command, {
+    ...os.ownGroup,
     cwd: app.dir,
     shell: true,
-    detached: true,
     stdio: ["ignore", out, out],
   });
   closeSync(out);
@@ -332,7 +330,7 @@ async function startServer(app: App, command: string, wanted: string, options: O
   let handedOver = false;
   const giveUp = async () => {
     handedOver = true;
-    await killGroup(state.pgid);
+    await killGroup(state.pgid, state.startedAt);
     // Only its own record: another server may have been recorded there since.
     const now = readState(name);
     if (now !== null && sameServer(now, state)) clearRecord(name);

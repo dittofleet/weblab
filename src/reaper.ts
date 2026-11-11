@@ -17,7 +17,7 @@
 // browser weblab only attached to, or another weblab's (in any checkout)
 // is never touched. A server another live weblab still uses stays up.
 import { setTimeout as sleep } from "node:timers/promises";
-import { alive, groupLeadersStartedBy, isProcess, killGroup, killProcess, membersOf, type Process, processOf, processTable } from "./processes.ts";
+import { alive, childrenOf, isProcess, killGroup, killProcess, membersOf, type Process, processOf, processTable } from "./processes.ts";
 import { sweepServers } from "./server.ts";
 import { clearRecord, readRecord, recordNames, writeRecord } from "./state.ts";
 
@@ -29,10 +29,10 @@ type BrowserState = Process & {
 
 const recordName = (pid: number) => `browser.${pid}`;
 
-// Playwright starts a browser in a process group of its own, talking to
-// it over a pipe whose flag is on its command line.
+// Playwright starts a browser as a child of this process, talking to it
+// over a pipe whose flag is on its command line.
 const DRIVEN = /\s(--remote-debugging-pipe|-juggler-pipe|--inspector-pipe)(\s|$)/;
-const browsersStarted = () => groupLeadersStartedBy(process.pid).filter((child) => DRIVEN.test(child.command)).map((child) => child.pid);
+const browsersStarted = () => childrenOf(process.pid).filter((child) => DRIVEN.test(child.command)).map((child) => child.pid);
 
 // How long a browser gets to close when asked, and then to go.
 const CLOSE_TIMEOUT_MS = 5000;
